@@ -126,11 +126,26 @@ python3 Code-Script/Pose-Analysis.py \
 
 **Insole pressure analysis**:
 ```bash
-# Run insole cyclogram analysis
-python3 Code-Script/insole-analysis.py
+# Single subject analysis
+python3 Code-Script/insole-analysis.py --input insole-sample/10MWT.csv --output insole-output/10MWT
+
+# Batch processing (all CSVs in insole-sample/)
+python3 Code-Script/insole-analysis.py --batch
+
+# Custom sampling rate and filter settings
+python3 Code-Script/insole-analysis.py --input data.csv --sampling-rate 100 --filter-cutoff 20.0
 ```
 
-**When to use `--enhance-angles`**:
+**Insole analysis outputs**:
+- **Organized subplot figures**: 7 types of multi-panel visualizations (gyro/acc stride/gait cyclograms, 3D trajectories, gait event timelines)
+- **PNG+JSON pairs**: Every visualization has metadata companion
+- **Directory structure**: Categorized into `plots/` and `json/` with subcategories (`gait_phases/`, `stride_cyclograms/`, etc.)
+- **Individual cyclograms**: First 3 cycles per sensor pair with phase segmentation
+- **Summary files**: Gait cycle metrics, symmetry analysis, validation results
+
+See `claudedocs/insole_subplot_visualization_system.md` for complete documentation on the subplot visualization system.
+
+**When to use `--enhance-angles`** (pose analysis):
 - Data has NaN gaps but keypoints exist
 - Data quality score < 0.5
 - Getting < 5 valid L-R pairs

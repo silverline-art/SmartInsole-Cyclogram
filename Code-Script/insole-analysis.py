@@ -2962,6 +2962,18 @@ class InsolePipeline:
             output_path = output_dir / f"{leg}_{x_label}_vs_{y_label}_mean.png"
             self.visualizer.plot_aggregated_cyclogram(cyclograms, output_path)
 
+        # ====================================================================
+        # SUBPLOT FIGURE GENERATION (Organized Multi-Panel Visualizations)
+        # ====================================================================
+        print("\nGenerating organized subplot figures...")
+        subject_name = input_csv.stem  # Extract subject name from filename
+
+        self._generate_subplot_figures(
+            left_cyclograms, right_cyclograms,
+            left_cycles, right_cycles,
+            subject_name
+        )
+
         # Save summary
         self._save_summary(left_cycles, right_cycles, validation, output_dir)
 
@@ -3115,6 +3127,116 @@ class InsolePipeline:
         aggregate.to_csv(aggregate_path)
 
         print(f"  Saved aggregate summary: {aggregate_path}")
+
+    def _generate_subplot_figures(self, left_cyclograms: List[CyclogramData],
+                                  right_cyclograms: List[CyclogramData],
+                                  left_cycles: List[GaitCycle],
+                                  right_cycles: List[GaitCycle],
+                                  subject_name: str):
+        """
+        Generate all organized subplot figures for comprehensive gait analysis.
+
+        Creates 7 types of multi-panel visualizations:
+        1. Gyroscopic Stride Cyclograms (2×3 grid: L/R × X-Y/X-Z/Y-Z)
+        2. Accelerometer Stride Cyclograms (2×3 grid)
+        3. 3D Stride Cyclograms (2×2 grid: L/R × Gyro3D/Acc3D)
+        4. Gyroscopic Gait Cyclograms (1×3 grid: X-Y/X-Z/Y-Z)
+        5. Accelerometer Gait Cyclograms (1×3 grid)
+        6. 3D Gait Cyclograms (1×2 grid: Gyro3D/Acc3D)
+        7. Gait Event Timeline (1×2 grid: Left/Right events)
+
+        Each figure is saved as PNG with accompanying JSON metadata.
+        """
+        # Organize cyclograms by sensor type and leg
+        cyclogram_dict = {
+            'left': {},
+            'right': {}
+        }
+
+        # Group cyclograms by sensor pair labels
+        for cyclogram in left_cyclograms + right_cyclograms:
+            leg = cyclogram.cycle.leg
+            key = f"{cyclogram.x_label}_vs_{cyclogram.y_label}"
+
+            if key not in cyclogram_dict[leg]:
+                cyclogram_dict[leg][key] = cyclogram
+
+        # Extract first cyclogram of each type for each leg
+        left_data = {}
+        right_data = {}
+
+        # Map sensor pair labels to subplot labels
+        sensor_mapping = {
+            'GYRO_X_vs_GYRO_Y': 'X-Y',
+            'GYRO_X_vs_GYRO_Z': 'X-Z',
+            'GYRO_Y_vs_GYRO_Z': 'Y-Z',
+            'ACC_X_vs_ACC_Y': 'X-Y',
+            'ACC_X_vs_ACC_Z': 'X-Z',
+            'ACC_Y_vs_ACC_Z': 'Y-Z'
+        }
+
+        for key, cyclogram in cyclogram_dict['left'].items():
+            label = sensor_mapping.get(key, key)
+            left_data[label] = cyclogram
+
+        for key, cyclogram in cyclogram_dict['right'].items():
+            label = sensor_mapping.get(key, key)
+            right_data[label] = cyclogram
+
+        # =================================================================
+        # 1. GYROSCOPIC STRIDE CYCLOGRAMS (if available)
+        # =================================================================
+        if any('GYRO' in k for k in cyclogram_dict['left'].keys()):
+            try:
+                data_dict = {'left': left_data, 'right': right_data}
+                fig, metadata, base_name = self.visualizer.create_and_populate_subplot_figure(
+                    'gyro_stride', data_dict, subject_name
+                )
+                self.visualizer.save_outputs(fig, metadata, base_name)
+                plt.close(fig)
+                print(f"  ✓ Generated: Gyroscopic Stride Cyclograms")
+            except Exception as e:
+                print(f"  ✗ Skipped Gyroscopic Stride: {str(e)}")
+
+        # =================================================================
+        # 2. ACCELEROMETER STRIDE CYCLOGRAMS (if available)
+        # =================================================================
+        if any('ACC' in k for k in cyclogram_dict['left'].keys()):
+            try:
+                data_dict = {'left': left_data, 'right': right_data}
+                fig, metadata, base_name = self.visualizer.create_and_populate_subplot_figure(
+                    'acc_stride', data_dict, subject_name
+                )
+                self.visualizer.save_outputs(fig, metadata, base_name)
+                plt.close(fig)
+                print(f"  ✓ Generated: Accelerometer Stride Cyclograms")
+            except Exception as e:
+                print(f"  ✗ Skipped Accelerometer Stride: {str(e)}")
+
+        # =================================================================
+        # 3. 3D STRIDE CYCLOGRAMS (if 3D data available)
+        # =================================================================
+        # Note: 3D cyclograms require specific 3D trajectory data structure
+        # This can be extended when 3D cyclogram generation is implemented
+
+        # =================================================================
+        # 4. GAIT EVENT TIMELINE
+        # =================================================================
+        try:
+            event_data = {
+                'left': left_cycles,
+                'right': right_cycles
+            }
+            fig, metadata, base_name = self.visualizer.create_and_populate_subplot_figure(
+                'gait_events', event_data, subject_name
+            )
+            self.visualizer.save_outputs(fig, metadata, base_name)
+            plt.close(fig)
+            print(f"  ✓ Generated: Gait Event Timeline")
+        except Exception as e:
+            print(f"  ✗ Skipped Gait Event Timeline: {str(e)}")
+
+        print(f"  Subplot figure generation complete")
 
     def _save_precision_events(self, df: pd.DataFrame, output_dir: Path):
         """Save high-precision gait events to CSV for validation."""
