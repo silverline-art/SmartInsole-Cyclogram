@@ -1,0 +1,9 @@
+
+divide and reorganize the code "/home/shivam/Desktop/Human_Pose/PROJECT CYCLOGRAM/smart insole/insole-analysis.py" into following below classes.
+
+1. Data_handling
+2. Gait_event_detection
+3. Gait_sub-event_detection
+4. Cyclogram_preparation
+5. Morphological_mean_cyclogram
+6. Plot_Preparation

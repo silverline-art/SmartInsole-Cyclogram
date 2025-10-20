@@ -1,0 +1,250 @@
+{
+  "video_name": "Openpose_\uc870\uc815\uc790_1917321_20240117_1",
+  "processing_metadata": {
+    "processing_timestamp": "2025-08-27T18:29:25.190011",
+    "data_completeness": {
+      "pose_estimation": 1,
+      "data_cleaning": 1,
+      "angle_calculation": 1,
+      "gait_analysis": 1
+    },
+    "quality_metrics": {
+      "data_quality_percentage": 100.0,
+      "total_gait_events": 76,
+      "event_detection_success": 1,
+      "pipeline_completion_percentage": 100.0
+    },
+    "pipeline_stages": [
+      "pose_estimation",
+      "data_cleaning",
+      "angle_calculation",
+      "gait_analysis"
+    ]
+  },
+  "pose_estimation": {
+    "raw_keypoints": {
+      "total_frames": 479,
+      "keypoints_count": 132,
+      "missing_values": 0,
+      "file_path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/raw_keypoints.csv"
+    },
+    "clean_keypoints": {
+      "total_frames": 479,
+      "total_columns": 146,
+      "keypoints_count": 132,
+      "custom_keypoints": 12,
+      "missing_values": 0,
+      "data_quality": "Complete",
+      "file_path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Clean_keypoints.csv"
+    }
+  },
+  "angle_analysis": {
+    "raw_angles": {
+      "total_frames": 479,
+      "angle_measurements": 15,
+      "angle_types": [
+        "trunk_sagittal_tilt_deg",
+        "trunk_lateral_tilt_deg",
+        "pelvic_obliquity_deg",
+        "pelvic_tilt_sagittal_deg",
+        "pelvis_yaw_deg",
+        "shoulder_yaw_deg",
+        "pelvis_shoulder_dissociation_deg",
+        "hip_flex_R_deg",
+        "hip_flex_L_deg",
+        "knee_flex_R_deg",
+        "knee_flex_L_deg",
+        "ankle_dorsi_R_deg",
+        "ankle_dorsi_L_deg",
+        "hip_rotation_index_deg",
+        "shoulder_rotation_index_deg"
+      ],
+      "missing_values": 1381,
+      "file_path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Raw_Angles.csv"
+    },
+    "analysis_summary": {
+      "metadata": {
+        "total_frames": 479,
+        "duration_seconds": 15.9293,
+        "fps": 30,
+        "processing_timestamp": "2025-08-27T18:28:59.676188"
+      },
+      "events_summary": {
+        "left_heel_strikes": 14,
+        "right_heel_strikes": 13,
+        "left_toe_offs": 13,
+        "right_toe_offs": 12,
+        "left_mid_stances": 12,
+        "right_mid_stances": 12
+      },
+      "symmetry_metrics": {
+        "hip_flex_symmetry_index": -12.126,
+        "knee_flex_symmetry_index": 0.7298,
+        "ankle_dorsi_symmetry_index": 6.143
+      },
+      "dissociation_metrics": {
+        "dissociation_ROM": 46.8606,
+        "dissociation_mean": -0.4194,
+        "dissociation_std": 4.2422,
+        "phase_lag_samples": 24,
+        "phase_lag_percent": 10.0209
+      },
+      "stride_statistics": {
+        "total_strides": 25,
+        "left_strides": 13,
+        "right_strides": 12,
+        "mean_stride_duration": 1.1387,
+        "std_stride_duration": 0.395
+      },
+      "file_path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Angle_Analysis_Summary.json"
+    },
+    "events": {
+      "total_events": 76,
+      "event_types": {
+        "heel_strikes": 27,
+        "toe_offs": 25,
+        "mid_stances": 24
+      },
+      "sides": {
+        "L": 39,
+        "R": 37
+      },
+      "file_path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Angle_Events.csv"
+    },
+    "stride_statistics": {
+      "total_strides": 25,
+      "left_strides": 13,
+      "right_strides": 12,
+      "mean_duration": 1.1387,
+      "std_duration": 0.395,
+      "file_path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Angle_Stride_Stats.csv"
+    }
+  },
+  "visualizations": {
+    "trajectory_analysis": {
+      "available": 1,
+      "file_path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/trajectory_analysis.pdf"
+    },
+    "movement_paths": {
+      "available": 1,
+      "file_path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/movement_paths.pdf"
+    },
+    "gait_figures": {
+      "count": 11,
+      "files": [
+        "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/gait_analysis_dashboard.png",
+        "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/cyclogram_hip_knee_R.png",
+        "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/rotation_indices_time_series.png",
+        "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/cyclogram_knee_ankle_L.png",
+        "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/dissociation_analysis.png",
+        "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/cyclogram_hip_LR.png",
+        "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/cyclogram_hip_knee_L.png",
+        "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/posture_angles_time_series.png",
+        "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/symmetry_analysis.png",
+        "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/cyclogram_knee_ankle_R.png",
+        "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/joint_angles_time_series.png"
+      ],
+      "directory": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures"
+    },
+    "gait_report": {
+      "available": 1,
+      "file_path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Report_GaitAngles.pdf"
+    },
+    "labeled_video": {
+      "available": 1,
+      "file_path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/labelled.mp4"
+    }
+  },
+  "file_inventory": {
+    "pose_files": [
+      {
+        "type": "raw_keypoints",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/raw_keypoints.csv"
+      },
+      {
+        "type": "clean_keypoints",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Clean_keypoints.csv"
+      }
+    ],
+    "angle_files": [
+      {
+        "type": "raw_angles",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Raw_Angles.csv"
+      },
+      {
+        "type": "analysis_summary",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Angle_Analysis_Summary.json"
+      },
+      {
+        "type": "events",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Angle_Events.csv"
+      },
+      {
+        "type": "stride_statistics",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Angle_Stride_Stats.csv"
+      }
+    ],
+    "visualization_files": [
+      {
+        "type": "trajectory_analysis",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/trajectory_analysis.pdf"
+      },
+      {
+        "type": "movement_paths",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/movement_paths.pdf"
+      },
+      {
+        "type": "gait_figures_figure",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/gait_analysis_dashboard.png"
+      },
+      {
+        "type": "gait_figures_figure",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/cyclogram_hip_knee_R.png"
+      },
+      {
+        "type": "gait_figures_figure",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/rotation_indices_time_series.png"
+      },
+      {
+        "type": "gait_figures_figure",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/cyclogram_knee_ankle_L.png"
+      },
+      {
+        "type": "gait_figures_figure",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/dissociation_analysis.png"
+      },
+      {
+        "type": "gait_figures_figure",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/cyclogram_hip_LR.png"
+      },
+      {
+        "type": "gait_figures_figure",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/cyclogram_hip_knee_L.png"
+      },
+      {
+        "type": "gait_figures_figure",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/posture_angles_time_series.png"
+      },
+      {
+        "type": "gait_figures_figure",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/symmetry_analysis.png"
+      },
+      {
+        "type": "gait_figures_figure",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/cyclogram_knee_ankle_R.png"
+      },
+      {
+        "type": "gait_figures_figure",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Figures/joint_angles_time_series.png"
+      },
+      {
+        "type": "gait_report",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/Report_GaitAngles.pdf"
+      },
+      {
+        "type": "labeled_video",
+        "path": "/home/shivam/Desktop/Human_Pose_Vid/RWD_DATA/Analyzed_Front_view/Data/Openpose_\uc870\uc815\uc790_1917321_20240117_1/labelled.mp4"
+      }
+    ]
+  }
+}

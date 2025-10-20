@@ -1,0 +1,26 @@
+{
+  "video_properties": {
+    "fps": 30.0,
+    "width": 640,
+    "height": 480,
+    "aspect_ratio": 1.3333333333333333,
+    "pixel_scale": 1.0
+  },
+  "anthropometric_measurements": {},
+  "perspective_corrections": {
+    "perspective_factor": 1.0,
+    "depth_variation": 0.0,
+    "camera_angle": 0.0,
+    "distance_factor": 1.0
+  },
+  "adaptive_filters": {},
+  "confidence_weights": {},
+  "calibration_summary": {
+    "total_keypoints": 67,
+    "total_frames": 479,
+    "anthropometric_measurements_count": 0,
+    "adaptive_filters_count": 0,
+    "confidence_weights_count": 0,
+    "calibration_quality_score": 0.0
+  }
+}
