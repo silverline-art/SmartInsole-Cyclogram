@@ -8,6 +8,16 @@ Human gait analysis system using **cyclograms** (angle-angle phase plots) to ass
 
 **Core concept**: Cyclograms visualize joint coordination by plotting one joint angle against another throughout the gait cycle (heel strike → heel strike). Left-right asymmetry indicates potential gait pathology.
 
+## Repository Information
+
+**GitHub**: https://github.com/silverline-art/Step-Cyclogram
+
+**Branch structure**:
+- `main`: Stable production branch for gait cyclogram analysis
+- Feature branches: Use `feature/*` naming convention
+
+**Note**: The `smart insole/` directory is excluded from this repository (maintained separately) and appears in `.gitignore`.
+
 ## Development Environment
 
 **Python virtual environment**: `.venv/`
