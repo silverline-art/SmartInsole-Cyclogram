@@ -883,22 +883,90 @@ class GaitPhaseDetector:
     def _detect_initial_contacts(self, pressure: np.ndarray,
                                  pressure_deriv: np.ndarray) -> List[int]:
         """
-        Detect initial contact (heel strike) events.
+        Detect initial contact (heel strike) events with adaptive multi-loop optimization.
 
-        Biomechanical signature: Sharp pressure rise
+        Uses dynamic threshold adjustment to find optimal step detection parameters.
+        Inspired by pressure sensor zone detection with region validation.
+
+        Biomechanical signature: Sharp pressure rise with sustained contact
         """
-        # Find peaks in pressure derivative (rapid increase)
-        ic_candidates, _ = find_peaks(
-            pressure_deriv,
-            height=self.config.pressure_derivative_threshold,
-            distance=int(self.config.sampling_rate * 0.5)  # Min 0.5s between ICs
-        )
+        # Adaptive step detection with multi-loop optimization
+        min_duration_frames = int(self.config.sampling_rate * self.config.min_stance_duration)
+        validation_window = 5  # frames to check before/after for clean transitions
 
-        # Filter by pressure level (must be significant contact)
-        ic_indices = [idx for idx in ic_candidates
-                     if pressure[idx] > self.config.pressure_threshold]
+        best_steps = []
+        best_count = 0
+        max_loops = 5
 
-        return ic_indices
+        for loop in range(max_loops):
+            # Dynamic threshold calculation (increases each iteration)
+            base_threshold = self.config.pressure_threshold
+            noise_threshold = base_threshold + loop * 0.1 * np.std(pressure)
+
+            # Dynamic prominence for peak detection
+            prominence = (0.12 + 0.05 * loop) * (np.max(pressure) - np.min(pressure))
+
+            # Find peaks with adaptive parameters
+            peaks, _ = find_peaks(
+                pressure,
+                height=noise_threshold,
+                prominence=prominence,
+                distance=min_duration_frames
+            )
+
+            # Detect contact periods using threshold crossing
+            is_in_contact = pressure > noise_threshold
+            diffs = np.diff(is_in_contact.astype(int))
+            initial_starts = np.where(diffs == 1)[0]
+            initial_ends = np.where(diffs == -1)[0]
+
+            # Handle edge cases
+            if is_in_contact[0]:
+                initial_starts = np.insert(initial_starts, 0, 0)
+            if is_in_contact[-1]:
+                initial_ends = np.append(initial_ends, len(is_in_contact) - 1)
+
+            # Align starts and ends
+            min_len = min(len(initial_starts), len(initial_ends))
+            initial_starts = initial_starts[:min_len]
+            initial_ends = initial_ends[:min_len]
+
+            # Validate each contact period
+            candidate_steps = []
+            for start, end in zip(initial_starts, initial_ends):
+                if (end - start) < min_duration_frames:
+                    continue
+
+                # Check for clean start (low pressure before contact)
+                is_clean_start = True
+                pre_window_start = max(0, start - validation_window)
+                if start > 0 and np.mean(pressure[pre_window_start:start]) >= noise_threshold:
+                    is_clean_start = False
+
+                # Check for clean end (low pressure after contact)
+                is_clean_end = True
+                post_window_end = min(len(pressure), end + 1 + validation_window)
+                if end < len(pressure) - 1 and np.mean(pressure[end+1:post_window_end]) >= noise_threshold:
+                    is_clean_end = False
+
+                if is_clean_start and is_clean_end:
+                    # Find peak within this contact period
+                    if start < end:
+                        peak_in_window = np.argmax(pressure[start:end])
+                        candidate_steps.append(start + peak_in_window)
+                    else:
+                        candidate_steps.append(start)
+
+            # Track best result across iterations
+            if len(candidate_steps) > best_count:
+                best_steps = candidate_steps
+                best_count = len(candidate_steps)
+
+            # Early exit if we found reasonable number of steps (8-40 is typical for 10MWT)
+            if 8 <= len(candidate_steps) <= 40:
+                break
+
+        return best_steps
 
     def _detect_phases_in_cycle(self, df: pd.DataFrame, leg: str,
                                 start_idx: int, end_idx: int,
@@ -1234,35 +1302,64 @@ class CyclogramGenerator:
         """
         Generate multiple cyclogram types for each gait cycle.
 
-        Cyclogram types:
-        1. ACC_X vs ACC_Y (sagittal-frontal acceleration)
-        2. ACC_Z vs GYRO_Y (vertical acc vs pitch rate)
-        3. GYRO_X vs GYRO_Z (roll-yaw coordination)
+        Cyclogram types (6 2D + 2 3D = 8 total):
+        2D Cyclograms:
+        1. ACC_X vs ACC_Y (frontal-sagittal plane)
+        2. ACC_X vs ACC_Z (frontal-vertical plane)
+        3. ACC_Y vs ACC_Z (sagittal-vertical plane)
+        4. GYRO_X vs GYRO_Y (roll-pitch plane)
+        5. GYRO_X vs GYRO_Z (roll-yaw plane)
+        6. GYRO_Y vs GYRO_Z (pitch-yaw plane)
+
+        3D Cyclograms:
+        7. ACC 3D (X, Y, Z)
+        8. GYRO 3D (X, Y, Z)
         """
         cyclograms = []
 
         # Convert leg name to uppercase prefix
         leg_prefix = 'L' if leg == 'left' else 'R'
 
-        cyclogram_types = [
-            (f'{leg_prefix}_ACC_X_filt', f'{leg_prefix}_ACC_Y_filt', 'ACC_X', 'ACC_Y'),
-            (f'{leg_prefix}_ACC_Z_filt', f'{leg_prefix}_GYRO_Y_filt', 'ACC_Z', 'GYRO_Y'),
-            (f'{leg_prefix}_GYRO_X_filt', f'{leg_prefix}_GYRO_Z_filt', 'GYRO_X', 'GYRO_Z')
+        # 2D cyclogram types: All 3 plane combinations for both ACC and GYRO
+        cyclogram_2d_types = [
+            # Accelerometer planes
+            (f'{leg_prefix}_ACC_X_filt', f'{leg_prefix}_ACC_Y_filt', None, 'ACC_X', 'ACC_Y', None),
+            (f'{leg_prefix}_ACC_X_filt', f'{leg_prefix}_ACC_Z_filt', None, 'ACC_X', 'ACC_Z', None),
+            (f'{leg_prefix}_ACC_Y_filt', f'{leg_prefix}_ACC_Z_filt', None, 'ACC_Y', 'ACC_Z', None),
+            # Gyroscope planes
+            (f'{leg_prefix}_GYRO_X_filt', f'{leg_prefix}_GYRO_Y_filt', None, 'GYRO_X', 'GYRO_Y', None),
+            (f'{leg_prefix}_GYRO_X_filt', f'{leg_prefix}_GYRO_Z_filt', None, 'GYRO_X', 'GYRO_Z', None),
+            (f'{leg_prefix}_GYRO_Y_filt', f'{leg_prefix}_GYRO_Z_filt', None, 'GYRO_Y', 'GYRO_Z', None),
+        ]
+
+        # 3D cyclogram types
+        cyclogram_3d_types = [
+            (f'{leg_prefix}_ACC_X_filt', f'{leg_prefix}_ACC_Y_filt', f'{leg_prefix}_ACC_Z_filt', 'ACC_X', 'ACC_Y', 'ACC_Z'),
+            (f'{leg_prefix}_GYRO_X_filt', f'{leg_prefix}_GYRO_Y_filt', f'{leg_prefix}_GYRO_Z_filt', 'GYRO_X', 'GYRO_Y', 'GYRO_Z'),
         ]
 
         for cycle in cycles:
-            for x_col, y_col, x_label, y_label in cyclogram_types:
+            # Generate 2D cyclograms
+            for x_col, y_col, z_col, x_label, y_label, z_label in cyclogram_2d_types:
                 cyclogram = self._extract_cyclogram(
-                    df, cycle, x_col, y_col, x_label, y_label
+                    df, cycle, x_col, y_col, z_col, x_label, y_label, z_label
+                )
+                cyclograms.append(cyclogram)
+
+            # Generate 3D cyclograms
+            for x_col, y_col, z_col, x_label, y_label, z_label in cyclogram_3d_types:
+                cyclogram = self._extract_cyclogram(
+                    df, cycle, x_col, y_col, z_col, x_label, y_label, z_label, is_3d=True
                 )
                 cyclograms.append(cyclogram)
 
         return cyclograms
 
     def _extract_cyclogram(self, df: pd.DataFrame, cycle: GaitCycle,
-                          x_col: str, y_col: str,
-                          x_label: str, y_label: str) -> CyclogramData:
-        """Extract single cyclogram for one cycle."""
+                          x_col: str, y_col: str, z_col: Optional[str],
+                          x_label: str, y_label: str, z_label: Optional[str],
+                          is_3d: bool = False) -> CyclogramData:
+        """Extract single cyclogram for one cycle (2D or 3D)."""
 
         # Get cycle data
         start_idx = cycle.phases[0].start_idx
@@ -1272,6 +1369,7 @@ class CyclogramGenerator:
 
         x_signal = cycle_data[x_col].values
         y_signal = cycle_data[y_col].values
+        z_signal = cycle_data[z_col].values if z_col is not None else None
 
         # Normalize to percentage of gait cycle
         normalized_length = self.config.cyclogram_resolution
@@ -1280,6 +1378,7 @@ class CyclogramGenerator:
             # Handle edge case
             x_signal_norm = np.zeros(normalized_length)
             y_signal_norm = np.zeros(normalized_length)
+            z_signal_norm = np.zeros(normalized_length) if is_3d else None
         else:
             time_original = np.linspace(0, 100, len(x_signal))
             time_normalized = np.linspace(0, 100, normalized_length)
@@ -1291,6 +1390,14 @@ class CyclogramGenerator:
 
             x_signal_norm = x_interp(time_normalized)
             y_signal_norm = y_interp(time_normalized)
+
+            # Interpolate z-axis for 3D cyclograms
+            if is_3d and z_signal is not None:
+                z_interp = interp1d(time_original, z_signal, kind='cubic',
+                                   fill_value='extrapolate')
+                z_signal_norm = z_interp(time_normalized)
+            else:
+                z_signal_norm = None
 
         # Compute phase boundary indices in normalized space
         phase_indices = []
@@ -1307,11 +1414,13 @@ class CyclogramGenerator:
             cycle=cycle,
             x_signal=x_signal_norm,
             y_signal=y_signal_norm,
+            z_signal=z_signal_norm,
             x_label=x_label,
             y_label=y_label,
+            z_label=z_label,
             phase_indices=phase_indices,
             phase_labels=phase_labels,
-            is_3d=False
+            is_3d=is_3d
         )
 
     def compute_cyclogram_metrics(self, cyclogram: CyclogramData) -> Dict:
@@ -2261,6 +2370,108 @@ class InsoleVisualizer:
                 'dominant_frequencies': kwargs.get('dominant_frequencies', {})
             }
 
+        # Add detailed stride events with cyclogram data if provided
+        if 'cycles' in kwargs and kwargs['cycles']:
+            cycles = kwargs['cycles']
+            stride_events = []
+
+            # Also get cyclograms if available
+            cyclograms_by_cycle = {}
+            if 'cyclograms' in kwargs and kwargs['cyclograms']:
+                for cyc in kwargs['cyclograms']:
+                    if cyc and hasattr(cyc, 'cycle'):
+                        key = (cyc.cycle.leg, cyc.cycle.cycle_id)
+                        if key not in cyclograms_by_cycle:
+                            cyclograms_by_cycle[key] = []
+                        cyclograms_by_cycle[key].append(cyc)
+
+            for cycle in cycles:
+                stride_event = {
+                    'cycle_id': cycle.cycle_id,
+                    'leg': cycle.leg,
+                    'start_time': float(cycle.start_time),
+                    'end_time': float(cycle.end_time),
+                    'duration': float(cycle.duration),
+                    'stance_duration': float(cycle.stance_duration),
+                    'swing_duration': float(cycle.swing_duration),
+                    'stance_swing_ratio': float(cycle.stance_swing_ratio),
+                    'phases': [],
+                    'cyclograms': []
+                }
+
+                # Add detailed phase information
+                for phase in cycle.phases:
+                    phase_info = {
+                        'phase_number': phase.phase_number,
+                        'phase_name': phase.phase_name,
+                        'start_time': float(phase.start_time),
+                        'duration': float(phase.duration),
+                        'start_idx': int(phase.start_idx),
+                        'end_idx': int(phase.end_idx)
+                    }
+                    stride_event['phases'].append(phase_info)
+
+                # Add cyclogram data for this stride
+                key = (cycle.leg, cycle.cycle_id)
+                if key in cyclograms_by_cycle:
+                    for cyclogram in cyclograms_by_cycle[key]:
+                        cyclogram_data = {
+                            'type': f"{cyclogram.x_label}_vs_{cyclogram.y_label}",
+                            'x_label': cyclogram.x_label,
+                            'y_label': cyclogram.y_label,
+                            'is_3d': cyclogram.is_3d
+                        }
+
+                        # Add z_label for 3D cyclograms
+                        if cyclogram.is_3d and cyclogram.z_label:
+                            cyclogram_data['z_label'] = cyclogram.z_label
+
+                        # Add metrics if available
+                        if hasattr(cyclogram, 'x_signal') and cyclogram.x_signal is not None:
+                            # Compute basic metrics
+                            x, y = cyclogram.x_signal, cyclogram.y_signal
+                            cyclogram_data['signal_length'] = len(x)
+                            cyclogram_data['x_range'] = [float(np.min(x)), float(np.max(x))]
+                            cyclogram_data['y_range'] = [float(np.min(y)), float(np.max(y))]
+
+                            if cyclogram.is_3d and cyclogram.z_signal is not None:
+                                z = cyclogram.z_signal
+                                cyclogram_data['z_range'] = [float(np.min(z)), float(np.max(z))]
+
+                            # Compute geometric metrics
+                            try:
+                                # Area using shoelace formula
+                                area = 0.5 * np.abs(np.dot(x[:-1], y[1:]) - np.dot(x[1:], y[:-1]))
+                                cyclogram_data['area'] = float(area)
+
+                                # Perimeter
+                                perimeter = np.sum(np.sqrt(np.diff(x)**2 + np.diff(y)**2))
+                                cyclogram_data['perimeter'] = float(perimeter)
+
+                                # Closure error
+                                closure_error = np.sqrt((x[-1] - x[0])**2 + (y[-1] - y[0])**2)
+                                cyclogram_data['closure_error'] = float(closure_error)
+
+                                # For 3D cyclograms, add 3D-specific metrics
+                                if cyclogram.is_3d and cyclogram.z_signal is not None:
+                                    trajectory_length_3d = np.sum(np.sqrt(
+                                        np.diff(x)**2 + np.diff(y)**2 + np.diff(z)**2
+                                    ))
+                                    cyclogram_data['trajectory_length_3d'] = float(trajectory_length_3d)
+
+                                    closure_error_3d = np.sqrt(
+                                        (x[-1] - x[0])**2 + (y[-1] - y[0])**2 + (z[-1] - z[0])**2
+                                    )
+                                    cyclogram_data['closure_error_3d'] = float(closure_error_3d)
+                            except Exception:
+                                pass  # Skip metrics if computation fails
+
+                        stride_event['cyclograms'].append(cyclogram_data)
+
+                stride_events.append(stride_event)
+
+            metadata['stride_events'] = stride_events
+
         # Add cyclogram-specific data
         if 'cyclogram' in kwargs:
             cyclogram = kwargs['cyclogram']
@@ -2295,7 +2506,7 @@ class InsoleVisualizer:
             }
 
         # Add cycles data
-        if 'cycles' in kwargs:
+        if 'cycles' in kwargs and kwargs['cycles'] is not None:
             cycles = kwargs['cycles']
             metadata["hardware_info"]["num_cycles"] = len(cycles)
 
@@ -2310,10 +2521,10 @@ class InsoleVisualizer:
         - gyro_stride: 2x3 (L/R × XY/XZ/YZ) = 6 subplots
         - acc_stride: 2x3 = 6 subplots
         - 3d_stride: 2x2 (L/R × Gyro3D/Acc3D) = 4 subplots
-        - gyro_gait: 1x3 (XY/XZ/YZ) = 3 subplots
-        - acc_gait: 1x3 = 3 subplots
+        - gyro_gait: 2x3 (L/R × XY/XZ/YZ) = 6 subplots
+        - acc_gait: 2x3 (L/R × XY/XZ/YZ) = 6 subplots
         - 3d_gait: 1x2 (Gyro3D/Acc3D) = 2 subplots
-        - gait_events: 1x2 (Left/Right timeline) = 2 subplots
+        - gait_events: 2x1 (L/R feet complete) = 2 subplots (stacked by foot zone)
 
         Returns:
             fig: Figure object (12×6 in @ 300 DPI)
@@ -2324,10 +2535,10 @@ class InsoleVisualizer:
             'gyro_stride': (2, 3, ["Left X-Y", "Left X-Z", "Left Y-Z", "Right X-Y", "Right X-Z", "Right Y-Z"]),
             'acc_stride': (2, 3, ["Left X-Y", "Left X-Z", "Left Y-Z", "Right X-Y", "Right X-Z", "Right Y-Z"]),
             '3d_stride': (2, 2, ["Left Gyro 3D", "Left Acc 3D", "Right Gyro 3D", "Right Acc 3D"]),
-            'gyro_gait': (1, 3, ["X-Y Plane", "X-Z Plane", "Y-Z Plane"]),
-            'acc_gait': (1, 3, ["X-Y Plane", "X-Z Plane", "Y-Z Plane"]),
+            'gyro_gait': (2, 3, ["Left X-Y", "Left X-Z", "Left Y-Z", "Right X-Y", "Right X-Z", "Right Y-Z"]),
+            'acc_gait': (2, 3, ["Left X-Y", "Left X-Z", "Left Y-Z", "Right X-Y", "Right X-Z", "Right Y-Z"]),
             '3d_gait': (1, 2, ["Gyroscope 3D", "Accelerometer 3D"]),
-            'gait_events': (1, 2, ["Left Leg Events", "Right Leg Events"])
+            'gait_events': (2, 1, ["Left Foot Complete", "Right Foot Complete"])
         }
 
         if analysis_type not in layouts:
@@ -2366,7 +2577,7 @@ class InsoleVisualizer:
         """
         subplot_metrics = []
         sensor_pairs = [('GYRO_X', 'GYRO_Y'), ('GYRO_X', 'GYRO_Z'), ('GYRO_Y', 'GYRO_Z')]
-        pair_labels = ['X-Y', 'X-Z', 'Y-Z']
+        pair_labels = ['X-Y Plane', 'X-Z Plane', 'Y-Z Plane']
 
         for leg_idx, leg in enumerate(['left', 'right']):
             leg_data = data_dict.get(leg, {})
@@ -2429,7 +2640,7 @@ class InsoleVisualizer:
         """
         subplot_metrics = []
         sensor_pairs = [('ACC_X', 'ACC_Y'), ('ACC_X', 'ACC_Z'), ('ACC_Y', 'ACC_Z')]
-        pair_labels = ['X-Y', 'X-Z', 'Y-Z']
+        pair_labels = ['X-Y Plane', 'X-Z Plane', 'Y-Z Plane']
 
         # Similar implementation to _plot_gyro_stride_subplots but for accelerometer data
         for leg_idx, leg in enumerate(['left', 'right']):
@@ -2481,36 +2692,109 @@ class InsoleVisualizer:
 
     def _plot_gait_events_subplots(self, axes: np.ndarray, data_dict: Dict) -> List[Dict]:
         """
-        Populate 1x2 grid with gait event timelines (left/right comparison).
+        Populate 2x1 grid with gait event timelines showing foot zone grouping.
 
-        Shows heel strikes, toe-offs, and 8-phase boundaries across full trial.
+        Layout: 2 rows (left foot top, right foot bottom) × 1 column
+        Each subplot shows all 4 pressure sensors grouped by foot zone:
+        - Forefoot: Sensor 2
+        - Midfoot: Sensors 1, 3
+        - Hindfoot: Sensor 4
+
+        Shows heel strikes, toe-offs, and 8-phase boundaries.
         """
         subplot_metrics = []
 
+        # Extract DataFrame and events from data_dict
+        df = data_dict.get('df', None)
+        left_events = data_dict.get('left', {})
+        right_events = data_dict.get('right', {})
+
+        # Define sensor grouping by foot zone
+        # User specified: forefoot=2, midfoot=1,3, hindfoot=4
+        foot_zones = {
+            'Forefoot': [2],      # Sensor 2
+            'Midfoot': [1, 3],    # Sensors 1, 3
+            'Hindfoot': [4]       # Sensor 4
+        }
+
+        # Sensor column names
+        sensor_columns = {
+            'left': {1: 'L_value1', 2: 'L_value2', 3: 'L_value3', 4: 'L_value4'},
+            'right': {1: 'R_value1', 2: 'R_value2', 3: 'R_value3', 4: 'R_value4'}
+        }
+
+        # Colors for each zone
+        zone_colors = {
+            'Forefoot': '#1f77b4',  # blue
+            'Midfoot': '#ff7f0e',   # orange
+            'Hindfoot': '#2ca02c'   # green
+        }
+
+        # If no DataFrame, display error
+        if df is None:
+            for leg_idx, leg in enumerate(['left', 'right']):
+                ax = axes[leg_idx, 0] if axes.ndim > 1 else axes[leg_idx]
+                ax.text(0.5, 0.5, f'No pressure data available for {leg.title()} foot',
+                       ha='center', va='center', transform=ax.transAxes, fontsize=10)
+                ax.set_title(f"{leg.title()} Foot Complete", fontsize=11, fontweight='bold')
+                subplot_metrics.append({
+                    'subplot_index': leg_idx,
+                    'position': [leg_idx, 0],
+                    'leg': leg,
+                    'data': None
+                })
+            return subplot_metrics
+
+        # Get time column
+        time_col = 'time' if 'time' in df.columns else df.columns[0]
+        time_data = df[time_col].values
+
+        # Plot each foot (left=top, right=bottom)
         for leg_idx, leg in enumerate(['left', 'right']):
-            ax = axes[0, leg_idx]
-            events = data_dict.get(leg, {})
+            ax = axes[leg_idx, 0] if axes.ndim > 1 else axes[leg_idx]
+            events = left_events if leg == 'left' else right_events
 
             heel_strikes = events.get('heel_strikes', [])
             toe_offs = events.get('toe_offs', [])
             phases = events.get('phases', [])
 
-            if not heel_strikes:
-                ax.text(0.5, 0.5, f'No events for {leg.title()} leg',
-                       ha='center', va='center', transform=ax.transAxes)
-                ax.set_title(f"{leg.title()} Leg Events", fontsize=10, fontweight='bold')
-                subplot_metrics.append({'subplot_index': leg_idx, 'data': None})
-                continue
+            # Prepare stacked plot data
+            all_zone_data = []
+            zone_labels = []
+            y_offset = 0
+            y_ticks = []
+            y_tick_labels = []
 
-            # Plot heel strikes
-            ax.scatter(heel_strikes, [1]*len(heel_strikes),
-                      marker='v', s=100, c='green', label='Heel Strike', zorder=3)
+            # Plot each foot zone (stacked vertically within the subplot)
+            for zone_name, sensor_ids in foot_zones.items():
+                zone_color = zone_colors[zone_name]
 
-            # Plot toe-offs
-            ax.scatter(toe_offs, [1]*len(toe_offs),
-                      marker='^', s=100, c='red', label='Toe-Off', zorder=3)
+                for sensor_id in sensor_ids:
+                    sensor_col = sensor_columns[leg][sensor_id]
+
+                    if sensor_col in df.columns:
+                        pressure_data = df[sensor_col].values
+
+                        # Normalize and offset for stacking
+                        if len(pressure_data) > 0 and pressure_data.max() > 0:
+                            normalized = pressure_data / pressure_data.max() if pressure_data.max() > 0 else pressure_data
+                        else:
+                            normalized = pressure_data
+
+                        # Plot pressure timeline with offset
+                        ax.plot(time_data, normalized + y_offset, color=zone_color,
+                               linewidth=1.0, alpha=0.8, label=f"{zone_name} S{sensor_id}" if sensor_id == sensor_ids[0] else "")
+                        ax.fill_between(time_data, y_offset, normalized + y_offset,
+                                       color=zone_color, alpha=0.15)
+
+                        # Store tick position and label
+                        y_ticks.append(y_offset + 0.5)
+                        y_tick_labels.append(f"S{sensor_id}\n{zone_name}")
+
+                        y_offset += 1.2  # Stack spacing
 
             # Plot phase backgrounds
+            added_to_legend = set()
             for phase in phases:
                 start_t = phase.get('start_time', 0)
                 end_t = phase.get('end_time', 0)
@@ -2518,21 +2802,47 @@ class InsoleVisualizer:
                 phase_idx = phase.get('phase_number', 0) - 1
 
                 color = self.phase_colors[phase_idx % len(self.phase_colors)]
-                ax.axvspan(start_t, end_t, alpha=0.2, color=color, label=phase_name if leg_idx == 0 else "")
 
+                # Only add to legend for left foot (top subplot)
+                label = phase_name if (leg_idx == 0 and phase_name not in added_to_legend) else ""
+                if label:
+                    added_to_legend.add(phase_name)
+
+                ax.axvspan(start_t, end_t, alpha=0.1, color=color, label=label, zorder=0)
+
+            # Overlay heel strikes and toe-offs
+            for hs_time in heel_strikes:
+                ax.axvline(hs_time, color='green', linestyle='--', linewidth=1.5, alpha=0.7, zorder=2)
+            for to_time in toe_offs:
+                ax.axvline(to_time, color='red', linestyle='--', linewidth=1.5, alpha=0.7, zorder=2)
+
+            # Add event markers at top
+            if heel_strikes:
+                ax.scatter(heel_strikes, [y_offset]*len(heel_strikes),
+                         marker='v', s=80, c='green', label='Heel Strike', zorder=3, edgecolors='darkgreen', linewidths=1.5)
+            if toe_offs:
+                ax.scatter(toe_offs, [y_offset]*len(toe_offs),
+                         marker='^', s=80, c='red', label='Toe-Off', zorder=3, edgecolors='darkred', linewidths=1.5)
+
+            # Formatting
+            ax.set_title(f"{leg.title()} Foot Complete (Grouped by Zone)", fontsize=10, fontweight='bold')
             ax.set_xlabel('Time (s)', fontsize=8)
-            ax.set_ylabel('Events', fontsize=8)
-            ax.set_title(f"{leg.title()} Leg Events", fontsize=10, fontweight='bold')
-            ax.set_ylim(0.5, 1.5)
-            ax.set_yticks([])
-            ax.grid(True, alpha=0.3, axis='x')
-            ax.legend(loc='upper right', fontsize=6)
+            ax.set_ylabel('Normalized Pressure by Foot Zone', fontsize=8)
+            ax.set_yticks(y_ticks)
+            ax.set_yticklabels(y_tick_labels, fontsize=6)
+            ax.set_ylim(-0.2, y_offset + 0.5)
+            ax.grid(True, alpha=0.2, axis='x')
+            ax.tick_params(axis='x', labelsize=7)
+
+            # Add legend only to top subplot
+            if leg_idx == 0:
+                ax.legend(loc='upper right', fontsize=6, ncol=3, framealpha=0.9)
 
             subplot_metrics.append({
                 'subplot_index': leg_idx,
-                'position': [0, leg_idx],
-                'title': f"{leg.title()} Events",
+                'position': [leg_idx, 0],
                 'leg': leg,
+                'foot_zones': list(foot_zones.keys()),
                 'event_count': len(heel_strikes) + len(toe_offs),
                 'heel_strikes': len(heel_strikes),
                 'toe_offs': len(toe_offs)
@@ -2622,172 +2932,148 @@ class InsoleVisualizer:
 
     def _plot_gyro_gait_subplots(self, axes: np.ndarray, data_dict: Dict) -> List[Dict]:
         """
-        Populate 1x3 grid with gyroscopic cyclograms (gait level - combined L+R).
+        Populate 2x3 grid with gyroscopic cyclograms (gait level - Left vs Right comparison).
 
-        Layout: XY / XZ / YZ planes with left (blue) and right (red) overlaid.
-        Shows all individual cycles (semi-transparent) + bold mean + shaded ±SD envelope.
+        Layout (2 rows x 3 columns):
+        Row 0 (Left Leg):  X-Y | X-Z | Y-Z
+        Row 1 (Right Leg): X-Y | X-Z | Y-Z
+
+        Each subplot shows all cycles (semi-transparent) + mean + ±SD envelope.
         """
         subplot_metrics = []
         sensor_pairs = [('GYRO_X', 'GYRO_Y'), ('GYRO_X', 'GYRO_Z'), ('GYRO_Y', 'GYRO_Z')]
-        pair_labels = ['X-Y Plane', 'X-Z Plane', 'Y-Z Plane']
+        pair_labels = ['GYRO_X-Y Plane', 'GYRO_X-Z Plane', 'GYRO_Y-Z Plane']
+        display_labels = ['X-Y Plane', 'X-Z Plane', 'Y-Z Plane']
 
-        for col_idx, (pair, label) in enumerate(zip(sensor_pairs, pair_labels)):
-            ax = axes[0, col_idx]
+        for leg_idx, leg in enumerate(['left', 'right']):
+            leg_color = 'blue' if leg == 'left' else 'red'
+            leg_data = data_dict.get(leg, {})
 
-            # Plot left leg cycles (blue)
-            left_data = data_dict.get('left', {}).get(label, [])
-            if isinstance(left_data, list) and len(left_data) > 0:
-                # Plot all individual cycles (semi-transparent)
-                for cyclogram in left_data:
-                    if hasattr(cyclogram, 'x_signal'):
-                        ax.plot(cyclogram.x_signal, cyclogram.y_signal,
-                               color='blue', linewidth=0.5, alpha=0.2)
+            for col_idx, (pair, label, disp_label) in enumerate(zip(sensor_pairs, pair_labels, display_labels)):
+                ax = axes[leg_idx, col_idx]
 
-                # Compute and overlay mean with envelope
-                if len(left_data) > 1:
-                    mmc = self.mmc_computer.compute_mmc(left_data)
-                    if mmc:
-                        ax.plot(mmc.median_x, mmc.median_y, 'b-', linewidth=2.5,
-                               label=f'Left Mean (n={mmc.n_loops})', alpha=0.9)
-                        ax.fill_between(mmc.median_x,
-                                       mmc.variance_envelope_lower[:, 1],
-                                       mmc.variance_envelope_upper[:, 1],
-                                       alpha=0.15, color='blue', label='Left ±SD')
-                        ax.plot(mmc.median_x[0], mmc.median_y[0], 'bo', markersize=8)
+                # Get cyclogram data for this leg and plane (with GYRO_ prefix)
+                plane_data = leg_data.get(label, [])
+
+                if isinstance(plane_data, list) and len(plane_data) > 0:
+                    # Plot all individual cycles (semi-transparent)
+                    for cyclogram in plane_data:
+                        if hasattr(cyclogram, 'x_signal'):
+                            ax.plot(cyclogram.x_signal, cyclogram.y_signal,
+                                   color=leg_color, linewidth=0.5, alpha=0.2)
+
+                    # Compute and overlay mean with envelope
+                    if len(plane_data) > 1:
+                        mmc = self.mmc_computer.compute_mmc(plane_data)
+                        if mmc:
+                            ax.plot(mmc.median_x, mmc.median_y,
+                                   color=leg_color, linewidth=2.5,
+                                   label=f'Mean (n={mmc.n_loops})', alpha=0.9)
+                            ax.fill_between(mmc.median_x,
+                                           mmc.variance_envelope_lower[:, 1],
+                                           mmc.variance_envelope_upper[:, 1],
+                                           alpha=0.15, color=leg_color, label='±SD')
+                            ax.plot(mmc.median_x[0], mmc.median_y[0],
+                                   color=leg_color, marker='o', markersize=8)
+                    else:
+                        # Single cycle - plot bold
+                        ax.plot(plane_data[0].x_signal, plane_data[0].y_signal,
+                               color=leg_color, linewidth=2.5, label='Single Cycle', alpha=0.9)
+                        ax.plot(plane_data[0].x_signal[0], plane_data[0].y_signal[0],
+                               color=leg_color, marker='o', markersize=8)
                 else:
-                    # Single cycle - plot bold
-                    ax.plot(left_data[0].x_signal, left_data[0].y_signal,
-                           color='blue', linewidth=2.5, label='Left', alpha=0.9)
-                    ax.plot(left_data[0].x_signal[0], left_data[0].y_signal[0], 'bo', markersize=8)
+                    ax.text(0.5, 0.5, 'No Data',
+                           ha='center', va='center', transform=ax.transAxes, fontsize=10)
 
-            # Plot right leg cycles (red)
-            right_data = data_dict.get('right', {}).get(label, [])
-            if isinstance(right_data, list) and len(right_data) > 0:
-                # Plot all individual cycles (semi-transparent)
-                for cyclogram in right_data:
-                    if hasattr(cyclogram, 'x_signal'):
-                        ax.plot(cyclogram.x_signal, cyclogram.y_signal,
-                               color='red', linewidth=0.5, alpha=0.2)
+                ax.set_xlabel(pair[0], fontsize=8)
+                ax.set_ylabel(pair[1], fontsize=8)
+                ax.set_title(f"{leg.title()} - {disp_label}", fontsize=9, fontweight='bold')
+                ax.grid(True, alpha=0.3)
+                ax.set_aspect('equal', adjustable='box')
+                ax.legend(loc='best', fontsize=6, ncol=2)
 
-                # Compute and overlay mean with envelope
-                if len(right_data) > 1:
-                    mmc = self.mmc_computer.compute_mmc(right_data)
-                    if mmc:
-                        ax.plot(mmc.median_x, mmc.median_y, 'r-', linewidth=2.5,
-                               label=f'Right Mean (n={mmc.n_loops})', alpha=0.9)
-                        ax.fill_between(mmc.median_x,
-                                       mmc.variance_envelope_lower[:, 1],
-                                       mmc.variance_envelope_upper[:, 1],
-                                       alpha=0.15, color='red', label='Right ±SD')
-                        ax.plot(mmc.median_x[0], mmc.median_y[0], 'ro', markersize=8)
-                else:
-                    # Single cycle - plot bold
-                    ax.plot(right_data[0].x_signal, right_data[0].y_signal,
-                           color='red', linewidth=2.5, label='Right', alpha=0.9)
-                    ax.plot(right_data[0].x_signal[0], right_data[0].y_signal[0], 'ro', markersize=8)
-
-            ax.set_xlabel(pair[0], fontsize=9)
-            ax.set_ylabel(pair[1], fontsize=9)
-            ax.set_title(label, fontsize=10, fontweight='bold')
-            ax.grid(True, alpha=0.3)
-            ax.set_aspect('equal', adjustable='box')
-            ax.legend(loc='best', fontsize=7, ncol=2)
-
-            subplot_metrics.append({
-                'subplot_index': col_idx,
-                'position': [0, col_idx],
-                'title': f"Gyro {label}",
-                'sensor_pair': list(pair),
-                'bilateral': True,
-                'left_cycles': len(left_data) if isinstance(left_data, list) else 0,
-                'right_cycles': len(right_data) if isinstance(right_data, list) else 0
-            })
+                subplot_metrics.append({
+                    'subplot_index': leg_idx * 3 + col_idx,
+                    'position': [leg_idx, col_idx],
+                    'title': f"{leg.title()} Gyro {disp_label}",
+                    'leg': leg,
+                    'sensor_pair': list(pair),
+                    'cycles': len(plane_data) if isinstance(plane_data, list) else 0
+                })
 
         plt.tight_layout(rect=[0, 0, 1, 0.96])
         return subplot_metrics
 
     def _plot_acc_gait_subplots(self, axes: np.ndarray, data_dict: Dict) -> List[Dict]:
         """
-        Populate 1x3 grid with accelerometer cyclograms (gait level - combined L+R).
+        Populate 2x3 grid with accelerometer cyclograms (gait level - Left vs Right comparison).
 
-        Layout: XY / XZ / YZ planes with left (blue) and right (red) overlaid.
-        Shows all individual cycles (semi-transparent) + bold mean + shaded ±SD envelope.
+        Layout (2 rows x 3 columns):
+        Row 0 (Left Leg):  X-Y | X-Z | Y-Z
+        Row 1 (Right Leg): X-Y | X-Z | Y-Z
+
+        Each subplot shows all cycles (semi-transparent) + mean + ±SD envelope.
         """
         subplot_metrics = []
         sensor_pairs = [('ACC_X', 'ACC_Y'), ('ACC_X', 'ACC_Z'), ('ACC_Y', 'ACC_Z')]
-        pair_labels = ['X-Y Plane', 'X-Z Plane', 'Y-Z Plane']
+        pair_labels = ['ACC_X-Y Plane', 'ACC_X-Z Plane', 'ACC_Y-Z Plane']
+        display_labels = ['X-Y Plane', 'X-Z Plane', 'Y-Z Plane']
 
-        for col_idx, (pair, label) in enumerate(zip(sensor_pairs, pair_labels)):
-            ax = axes[0, col_idx]
+        for leg_idx, leg in enumerate(['left', 'right']):
+            leg_color = 'blue' if leg == 'left' else 'red'
+            leg_data = data_dict.get(leg, {})
 
-            # Plot left leg cycles (blue)
-            left_data = data_dict.get('left', {}).get(label, [])
-            if isinstance(left_data, list) and len(left_data) > 0:
-                # Plot all individual cycles (semi-transparent)
-                for cyclogram in left_data:
-                    if hasattr(cyclogram, 'x_signal'):
-                        ax.plot(cyclogram.x_signal, cyclogram.y_signal,
-                               color='blue', linewidth=0.5, alpha=0.2)
+            for col_idx, (pair, label, disp_label) in enumerate(zip(sensor_pairs, pair_labels, display_labels)):
+                ax = axes[leg_idx, col_idx]
 
-                # Compute and overlay mean with envelope
-                if len(left_data) > 1:
-                    mmc = self.mmc_computer.compute_mmc(left_data)
-                    if mmc:
-                        ax.plot(mmc.median_x, mmc.median_y, 'b-', linewidth=2.5,
-                               label=f'Left Mean (n={mmc.n_loops})', alpha=0.9)
-                        ax.fill_between(mmc.median_x,
-                                       mmc.variance_envelope_lower[:, 1],
-                                       mmc.variance_envelope_upper[:, 1],
-                                       alpha=0.15, color='blue', label='Left ±SD')
-                        ax.plot(mmc.median_x[0], mmc.median_y[0], 'bo', markersize=8)
+                # Get cyclogram data for this leg and plane (with ACC_ prefix)
+                plane_data = leg_data.get(label, [])
+
+                if isinstance(plane_data, list) and len(plane_data) > 0:
+                    # Plot all individual cycles (semi-transparent)
+                    for cyclogram in plane_data:
+                        if hasattr(cyclogram, 'x_signal'):
+                            ax.plot(cyclogram.x_signal, cyclogram.y_signal,
+                                   color=leg_color, linewidth=0.5, alpha=0.2)
+
+                    # Compute and overlay mean with envelope
+                    if len(plane_data) > 1:
+                        mmc = self.mmc_computer.compute_mmc(plane_data)
+                        if mmc:
+                            ax.plot(mmc.median_x, mmc.median_y,
+                                   color=leg_color, linewidth=2.5,
+                                   label=f'Mean (n={mmc.n_loops})', alpha=0.9)
+                            ax.fill_between(mmc.median_x,
+                                           mmc.variance_envelope_lower[:, 1],
+                                           mmc.variance_envelope_upper[:, 1],
+                                           alpha=0.15, color=leg_color, label='±SD')
+                            ax.plot(mmc.median_x[0], mmc.median_y[0],
+                                   color=leg_color, marker='o', markersize=8)
+                    else:
+                        # Single cycle - plot bold
+                        ax.plot(plane_data[0].x_signal, plane_data[0].y_signal,
+                               color=leg_color, linewidth=2.5, label='Single Cycle', alpha=0.9)
+                        ax.plot(plane_data[0].x_signal[0], plane_data[0].y_signal[0],
+                               color=leg_color, marker='o', markersize=8)
                 else:
-                    # Single cycle - plot bold
-                    ax.plot(left_data[0].x_signal, left_data[0].y_signal,
-                           color='blue', linewidth=2.5, label='Left', alpha=0.9)
-                    ax.plot(left_data[0].x_signal[0], left_data[0].y_signal[0], 'bo', markersize=8)
+                    ax.text(0.5, 0.5, 'No Data',
+                           ha='center', va='center', transform=ax.transAxes, fontsize=10)
 
-            # Plot right leg cycles (red)
-            right_data = data_dict.get('right', {}).get(label, [])
-            if isinstance(right_data, list) and len(right_data) > 0:
-                # Plot all individual cycles (semi-transparent)
-                for cyclogram in right_data:
-                    if hasattr(cyclogram, 'x_signal'):
-                        ax.plot(cyclogram.x_signal, cyclogram.y_signal,
-                               color='red', linewidth=0.5, alpha=0.2)
+                ax.set_xlabel(pair[0], fontsize=8)
+                ax.set_ylabel(pair[1], fontsize=8)
+                ax.set_title(f"{leg.title()} - {disp_label}", fontsize=9, fontweight='bold')
+                ax.grid(True, alpha=0.3)
+                ax.set_aspect('equal', adjustable='box')
+                ax.legend(loc='best', fontsize=6, ncol=2)
 
-                # Compute and overlay mean with envelope
-                if len(right_data) > 1:
-                    mmc = self.mmc_computer.compute_mmc(right_data)
-                    if mmc:
-                        ax.plot(mmc.median_x, mmc.median_y, 'r-', linewidth=2.5,
-                               label=f'Right Mean (n={mmc.n_loops})', alpha=0.9)
-                        ax.fill_between(mmc.median_x,
-                                       mmc.variance_envelope_lower[:, 1],
-                                       mmc.variance_envelope_upper[:, 1],
-                                       alpha=0.15, color='red', label='Right ±SD')
-                        ax.plot(mmc.median_x[0], mmc.median_y[0], 'ro', markersize=8)
-                else:
-                    # Single cycle - plot bold
-                    ax.plot(right_data[0].x_signal, right_data[0].y_signal,
-                           color='red', linewidth=2.5, label='Right', alpha=0.9)
-                    ax.plot(right_data[0].x_signal[0], right_data[0].y_signal[0], 'ro', markersize=8)
-
-            ax.set_xlabel(pair[0], fontsize=9)
-            ax.set_ylabel(pair[1], fontsize=9)
-            ax.set_title(label, fontsize=10, fontweight='bold')
-            ax.grid(True, alpha=0.3)
-            ax.set_aspect('equal', adjustable='box')
-            ax.legend(loc='best', fontsize=7, ncol=2)
-
-            subplot_metrics.append({
-                'subplot_index': col_idx,
-                'position': [0, col_idx],
-                'title': f"Acc {label}",
-                'sensor_pair': list(pair),
-                'bilateral': True,
-                'left_cycles': len(left_data) if isinstance(left_data, list) else 0,
-                'right_cycles': len(right_data) if isinstance(right_data, list) else 0
-            })
+                subplot_metrics.append({
+                    'subplot_index': leg_idx * 3 + col_idx,
+                    'position': [leg_idx, col_idx],
+                    'title': f"{leg.title()} Acc {disp_label}",
+                    'leg': leg,
+                    'sensor_pair': list(pair),
+                    'cycles': len(plane_data) if isinstance(plane_data, list) else 0
+                })
 
         plt.tight_layout(rect=[0, 0, 1, 0.96])
         return subplot_metrics
@@ -2797,6 +3083,7 @@ class InsoleVisualizer:
         Populate 1x2 grid with 3D cyclograms (gait level - combined L+R).
 
         Layout: Gyro 3D | Acc 3D (both with left and right overlaid)
+        Shows all individual cycles (semi-transparent) + mean trajectory (bold).
         """
         from mpl_toolkits.mplot3d import Axes3D
         subplot_metrics = []
@@ -2809,17 +3096,63 @@ class InsoleVisualizer:
             ax = plt.subplot(1, 2, col_idx + 1, projection='3d')
 
             # Plot left leg (blue)
-            left_3d = data_dict.get('left', {}).get(f'{sensor_type}_3d')
-            if left_3d and hasattr(left_3d, 'x_signal'):
-                ax.plot(left_3d.x_signal, left_3d.y_signal,
-                       left_3d.z_signal if hasattr(left_3d, 'z_signal') else np.zeros_like(left_3d.x_signal),
+            left_3d_data = data_dict.get('left', {}).get(f'{sensor_type}_3d')
+            if isinstance(left_3d_data, list) and len(left_3d_data) > 0:
+                # Plot all individual cycles (semi-transparent)
+                for cyclogram in left_3d_data:
+                    if hasattr(cyclogram, 'x_signal') and cyclogram.z_signal is not None:
+                        ax.plot(cyclogram.x_signal, cyclogram.y_signal, cyclogram.z_signal,
+                               color='blue', linewidth=0.5, alpha=0.2)
+
+                # Compute and plot mean trajectory (bold)
+                if len(left_3d_data) > 1:
+                    x_mean = np.mean([c.x_signal for c in left_3d_data], axis=0)
+                    y_mean = np.mean([c.y_signal for c in left_3d_data], axis=0)
+                    z_mean = np.mean([c.z_signal for c in left_3d_data], axis=0)
+                    ax.plot(x_mean, y_mean, z_mean,
+                           color='blue', linewidth=2.5, label=f'Left Mean (n={len(left_3d_data)})', alpha=0.9)
+                    ax.scatter(x_mean[0], y_mean[0], z_mean[0], c='blue', s=80, marker='o')
+                else:
+                    # Single cycle - plot bold
+                    cyclogram = left_3d_data[0]
+                    ax.plot(cyclogram.x_signal, cyclogram.y_signal, cyclogram.z_signal,
+                           color='blue', linewidth=2.5, label='Left', alpha=0.9)
+                    ax.scatter(cyclogram.x_signal[0], cyclogram.y_signal[0], cyclogram.z_signal[0],
+                              c='blue', s=80, marker='o')
+            elif left_3d_data and hasattr(left_3d_data, 'x_signal'):
+                # Single cyclogram (not in list)
+                ax.plot(left_3d_data.x_signal, left_3d_data.y_signal,
+                       left_3d_data.z_signal if hasattr(left_3d_data, 'z_signal') else np.zeros_like(left_3d_data.x_signal),
                        color='blue', linewidth=2, label='Left', alpha=0.7)
 
             # Plot right leg (red)
-            right_3d = data_dict.get('right', {}).get(f'{sensor_type}_3d')
-            if right_3d and hasattr(right_3d, 'x_signal'):
-                ax.plot(right_3d.x_signal, right_3d.y_signal,
-                       right_3d.z_signal if hasattr(right_3d, 'z_signal') else np.zeros_like(right_3d.x_signal),
+            right_3d_data = data_dict.get('right', {}).get(f'{sensor_type}_3d')
+            if isinstance(right_3d_data, list) and len(right_3d_data) > 0:
+                # Plot all individual cycles (semi-transparent)
+                for cyclogram in right_3d_data:
+                    if hasattr(cyclogram, 'x_signal') and cyclogram.z_signal is not None:
+                        ax.plot(cyclogram.x_signal, cyclogram.y_signal, cyclogram.z_signal,
+                               color='red', linewidth=0.5, alpha=0.2)
+
+                # Compute and plot mean trajectory (bold)
+                if len(right_3d_data) > 1:
+                    x_mean = np.mean([c.x_signal for c in right_3d_data], axis=0)
+                    y_mean = np.mean([c.y_signal for c in right_3d_data], axis=0)
+                    z_mean = np.mean([c.z_signal for c in right_3d_data], axis=0)
+                    ax.plot(x_mean, y_mean, z_mean,
+                           color='red', linewidth=2.5, label=f'Right Mean (n={len(right_3d_data)})', alpha=0.9)
+                    ax.scatter(x_mean[0], y_mean[0], z_mean[0], c='red', s=80, marker='o')
+                else:
+                    # Single cycle - plot bold
+                    cyclogram = right_3d_data[0]
+                    ax.plot(cyclogram.x_signal, cyclogram.y_signal, cyclogram.z_signal,
+                           color='red', linewidth=2.5, label='Right', alpha=0.9)
+                    ax.scatter(cyclogram.x_signal[0], cyclogram.y_signal[0], cyclogram.z_signal[0],
+                              c='red', s=80, marker='o')
+            elif right_3d_data and hasattr(right_3d_data, 'x_signal'):
+                # Single cyclogram (not in list)
+                ax.plot(right_3d_data.x_signal, right_3d_data.y_signal,
+                       right_3d_data.z_signal if hasattr(right_3d_data, 'z_signal') else np.zeros_like(right_3d_data.x_signal),
                        color='red', linewidth=2, label='Right', alpha=0.7)
 
             # Labels
@@ -2840,7 +3173,9 @@ class InsoleVisualizer:
                 'position': [0, col_idx],
                 'title': label,
                 'sensor_type': sensor_type,
-                'bilateral': True
+                'bilateral': True,
+                'left_cycles': len(left_3d_data) if isinstance(left_3d_data, list) else (1 if left_3d_data else 0),
+                'right_cycles': len(right_3d_data) if isinstance(right_3d_data, list) else (1 if right_3d_data else 0)
             })
 
         plt.tight_layout(rect=[0, 0, 1, 0.96])
@@ -2922,13 +3257,41 @@ class InsoleVisualizer:
         timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
         base_name = f"{analysis_type}_{subject_name}_{timestamp}"
 
+        # Extract cycles and cyclograms for stride event metadata
+        all_cycles = []
+        all_cyclograms = []
+
+        for leg_key in ['left', 'right']:
+            leg_data = data_dict.get(leg_key, {})
+            # For cyclogram plots, leg_data is a dict of sensor_label -> cyclogram(s)
+            # For gait_events, it's already in the right format
+            if analysis_type != 'gait_events' and isinstance(leg_data, dict):
+                for sensor_label, cyclogram_data in leg_data.items():
+                    # Get cyclograms (could be single or list)
+                    cyclograms = cyclogram_data if isinstance(cyclogram_data, list) else [cyclogram_data]
+                    for cyc in cyclograms:
+                        if cyc and hasattr(cyc, 'cycle'):
+                            all_cycles.append(cyc.cycle)
+                            all_cyclograms.append(cyc)
+
+        # Remove duplicate cycles based on cycle_id and leg
+        unique_cycles = []
+        seen_cycles = set()
+        for cycle in all_cycles:
+            key = (cycle.leg, cycle.cycle_id)
+            if key not in seen_cycles:
+                seen_cycles.add(key)
+                unique_cycles.append(cycle)
+
         metadata = self._generate_metadata(
             analysis_type=analysis_type,
             leg='bilateral',
             sensor_type=analysis_type.split('_')[0],  # gyro/acc/3d/gait
             file_name=f"{base_name}.png",
             subject=subject_name,
-            subplot_metrics=subplot_metrics
+            subplot_metrics=subplot_metrics,
+            cycles=unique_cycles if unique_cycles else None,
+            cyclograms=all_cyclograms if all_cyclograms else None
         )
 
         return fig, metadata, base_name
@@ -3018,34 +3381,19 @@ class InsolePipeline:
 
         self._print_validation_results(validation)
 
-        # Stage 8: Bilateral Symmetry Analysis
+        # Stage 8: Bilateral Symmetry Analysis (2D cyclograms only)
         print("\nComputing bilateral symmetry metrics...")
-        symmetry_metrics = self._compute_symmetry(left_cyclograms, right_cyclograms)
+        left_cyclograms_2d = [c for c in left_cyclograms if not c.is_3d]
+        right_cyclograms_2d = [c for c in right_cyclograms if not c.is_3d]
+        symmetry_metrics = self._compute_symmetry(left_cyclograms_2d, right_cyclograms_2d)
 
         # Stage 9: Visualization
         output_dir.mkdir(parents=True, exist_ok=True)
 
         print("\nGenerating visualizations with PNG+JSON output...")
 
-        # Plot individual cyclograms (first 3 of each type)
-        cyclogram_types = {}
-        for cyclogram in left_cyclograms + right_cyclograms:
-            key = (cyclogram.cycle.leg, cyclogram.x_label, cyclogram.y_label)
-            if key not in cyclogram_types:
-                cyclogram_types[key] = []
-            cyclogram_types[key].append(cyclogram)
-
-        for (leg, x_label, y_label), cyclograms in cyclogram_types.items():
-            # Plot first 3 individual cycles
-            for i, cyclogram in enumerate(cyclograms[:3]):
-                output_path = output_dir / f"{leg}_{x_label}_vs_{y_label}_cycle_{i+1}.png"
-                metrics = self.cyclogram_generator.compute_cyclogram_metrics(cyclogram)
-                mmc = left_mmc if leg == 'left' else right_mmc
-                self.visualizer.plot_phase_segmented_cyclogram(cyclogram, output_path, mmc, metrics)
-
-            # Plot aggregated mean
-            output_path = output_dir / f"{leg}_{x_label}_vs_{y_label}_mean.png"
-            self.visualizer.plot_aggregated_cyclogram(cyclograms, output_path)
+        # NOTE: Individual cyclogram plots are now generated as organized subplots only
+        # (removed individual file generation to reduce clutter and improve organization)
 
         # ====================================================================
         # SUBPLOT FIGURE GENERATION (Organized Multi-Panel Visualizations)
@@ -3056,7 +3404,8 @@ class InsolePipeline:
         self._generate_subplot_figures(
             left_cyclograms, right_cyclograms,
             left_cycles, right_cycles,
-            subject_name
+            subject_name,
+            df  # Pass DataFrame for individual pressure sensor access in gait events
         )
 
         # Save summary
@@ -3076,10 +3425,17 @@ class InsolePipeline:
         print("="*70)
 
     def _generate_mmc(self, cyclograms: List[CyclogramData], leg: str) -> Optional[MorphologicalMeanCyclogram]:
-        """Compute MMC for cyclograms of same sensor pair."""
+        """Compute MMC for 2D cyclograms of same sensor pair (3D cyclograms excluded)."""
+        # Filter out 3D cyclograms - MMC only works with 2D data
+        cyclograms_2d = [c for c in cyclograms if not c.is_3d]
+
+        if not cyclograms_2d:
+            print(f"  No 2D cyclograms available for {leg} MMC computation")
+            return None
+
         # Group by sensor pair
         by_pair = {}
-        for c in cyclograms:
+        for c in cyclograms_2d:
             key = (c.x_label, c.y_label)
             if key not in by_pair:
                 by_pair[key] = []
@@ -3114,7 +3470,7 @@ class InsolePipeline:
                      right_cycles: List[GaitCycle],
                      validation: ValidationMetrics,
                      output_dir: Path):
-        """Save analysis summary to CSV."""
+        """Save analysis summary to CSV with bilateral comparison."""
 
         summary_data = []
 
@@ -3135,6 +3491,45 @@ class InsolePipeline:
         df_summary.to_csv(summary_path, index=False)
 
         print(f"\n  Saved summary: {summary_path}")
+
+        # Add bilateral comparison summary
+        if len(left_cycles) > 0 and len(right_cycles) > 0:
+            left_avg = {
+                'duration': np.mean([c.duration for c in left_cycles]),
+                'stance_duration': np.mean([c.stance_duration for c in left_cycles]),
+                'swing_duration': np.mean([c.swing_duration for c in left_cycles]),
+                'stance_swing_ratio': np.mean([c.stance_swing_ratio for c in left_cycles])
+            }
+
+            right_avg = {
+                'duration': np.mean([c.duration for c in right_cycles]),
+                'stance_duration': np.mean([c.stance_duration for c in right_cycles]),
+                'swing_duration': np.mean([c.swing_duration for c in right_cycles]),
+                'stance_swing_ratio': np.mean([c.stance_swing_ratio for c in right_cycles])
+            }
+
+            bilateral_comparison = []
+            for metric in ['duration', 'stance_duration', 'swing_duration', 'stance_swing_ratio']:
+                left_val = left_avg[metric]
+                right_val = right_avg[metric]
+                asymmetry = abs(left_val - right_val) / ((left_val + right_val) / 2) * 100 if (left_val + right_val) > 0 else 0
+
+                bilateral_comparison.append({
+                    'metric': metric,
+                    'left_mean': left_val,
+                    'right_mean': right_val,
+                    'difference': left_val - right_val,
+                    'asymmetry_percent': asymmetry
+                })
+
+            df_bilateral = pd.DataFrame(bilateral_comparison)
+            bilateral_path = output_dir / 'bilateral_comparison_summary.csv'
+            df_bilateral.to_csv(bilateral_path, index=False)
+
+            print(f"  Saved bilateral comparison: {bilateral_path}")
+            print("\n  Bilateral Asymmetry Summary:")
+            for _, row in df_bilateral.iterrows():
+                print(f"    {row['metric']}: {row['asymmetry_percent']:.2f}% asymmetry")
 
     def _compute_symmetry(self, left_cyclograms: List[CyclogramData],
                          right_cyclograms: List[CyclogramData]) -> pd.DataFrame:
@@ -3217,7 +3612,8 @@ class InsolePipeline:
                                   right_cyclograms: List[CyclogramData],
                                   left_cycles: List[GaitCycle],
                                   right_cycles: List[GaitCycle],
-                                  subject_name: str):
+                                  subject_name: str,
+                                  df: pd.DataFrame = None):
         """
         Generate all organized subplot figures for comprehensive gait analysis.
 
@@ -3249,34 +3645,76 @@ class InsolePipeline:
         }
 
         # Map sensor pair labels to subplot labels
-        sensor_mapping = {
-            'GYRO_X_vs_GYRO_Y': 'X-Y',
-            'GYRO_X_vs_GYRO_Z': 'X-Z',
-            'GYRO_Y_vs_GYRO_Z': 'Y-Z',
-            'ACC_X_vs_ACC_Y': 'X-Y',
-            'ACC_X_vs_ACC_Z': 'X-Z',
-            'ACC_Y_vs_ACC_Z': 'Y-Z'
+        # For stride-level: Use simple labels (will be separated by plot type anyway)
+        # For gait-level: Use prefixed labels to avoid GYRO/ACC mixing in same dict
+        sensor_mapping_stride = {
+            'GYRO_X_vs_GYRO_Y': 'X-Y Plane',
+            'GYRO_X_vs_GYRO_Z': 'X-Z Plane',
+            'GYRO_Y_vs_GYRO_Z': 'Y-Z Plane',
+            'ACC_X_vs_ACC_Y': 'X-Y Plane',
+            'ACC_X_vs_ACC_Z': 'X-Z Plane',
+            'ACC_Y_vs_ACC_Z': 'Y-Z Plane'
+        }
+
+        # CRITICAL: Must include sensor type prefix to avoid mixing GYRO and ACC data in gait dict
+        sensor_mapping_gait = {
+            'GYRO_X_vs_GYRO_Y': 'GYRO_X-Y Plane',
+            'GYRO_X_vs_GYRO_Z': 'GYRO_X-Z Plane',
+            'GYRO_Y_vs_GYRO_Z': 'GYRO_Y-Z Plane',
+            'ACC_X_vs_ACC_Y': 'ACC_X-Y Plane',
+            'ACC_X_vs_ACC_Z': 'ACC_X-Z Plane',
+            'ACC_Y_vs_ACC_Z': 'ACC_Y-Z Plane'
         }
 
         # Organize cyclograms by sensor type and leg
         for cyclogram in left_cyclograms + right_cyclograms:
             leg = cyclogram.cycle.leg
-            key = f"{cyclogram.x_label}_vs_{cyclogram.y_label}"
-            label = sensor_mapping.get(key, key)
 
-            # For stride-level: keep only first cyclogram
-            if label not in stride_dict[leg]:
-                stride_dict[leg][label] = cyclogram
+            # Handle 3D cyclograms separately
+            if cyclogram.is_3d and cyclogram.z_signal is not None:
+                # Determine sensor type from x_label (ACC_X → acc, GYRO_X → gyro)
+                sensor_type = 'acc' if 'ACC' in cyclogram.x_label else 'gyro'
+                label_3d = f'{sensor_type}_3d'
 
-            # For gait-level: collect all cyclograms
-            if label not in gait_dict[leg]:
-                gait_dict[leg][label] = []
-            gait_dict[leg][label].append(cyclogram)
+                # For stride-level: keep only first 3D cyclogram
+                if label_3d not in stride_dict[leg]:
+                    stride_dict[leg][label_3d] = cyclogram
+
+                # For gait-level: collect all 3D cyclograms
+                if label_3d not in gait_dict[leg]:
+                    gait_dict[leg][label_3d] = []
+                gait_dict[leg][label_3d].append(cyclogram)
+            else:
+                # Handle 2D cyclograms
+                key = f"{cyclogram.x_label}_vs_{cyclogram.y_label}"
+                label_stride = sensor_mapping_stride.get(key, key)
+                label_gait = sensor_mapping_gait.get(key, key)
+
+                # Determine sensor type for proper categorization
+                is_gyro = 'GYRO' in key
+                is_acc = 'ACC' in key
+
+                # For stride-level: keep only first cyclogram (use unprefixed labels)
+                if label_stride not in stride_dict[leg]:
+                    stride_dict[leg][label_stride] = cyclogram
+
+                # For gait-level: collect all cyclograms (use prefixed labels to avoid collision)
+                if label_gait not in gait_dict[leg]:
+                    gait_dict[leg][label_gait] = []
+                gait_dict[leg][label_gait].append(cyclogram)
+
+                # Also track sensor type for plot generation checks
+                if is_gyro:
+                    stride_dict[leg][f'_has_gyro'] = True
+                    gait_dict[leg][f'_has_gyro'] = True
+                if is_acc:
+                    stride_dict[leg][f'_has_acc'] = True
+                    gait_dict[leg][f'_has_acc'] = True
 
         # =================================================================
         # 1. GYROSCOPIC STRIDE CYCLOGRAMS (if available)
         # =================================================================
-        if any('GYRO' in k for k in stride_dict['left'].keys()):
+        if stride_dict['left'].get('_has_gyro', False) or stride_dict['right'].get('_has_gyro', False):
             try:
                 fig, metadata, base_name = self.visualizer.create_and_populate_subplot_figure(
                     'gyro_stride', stride_dict, subject_name
@@ -3290,7 +3728,7 @@ class InsolePipeline:
         # =================================================================
         # 2. ACCELEROMETER STRIDE CYCLOGRAMS (if available)
         # =================================================================
-        if any('ACC' in k for k in stride_dict['left'].keys()):
+        if stride_dict['left'].get('_has_acc', False) or stride_dict['right'].get('_has_acc', False):
             try:
                 fig, metadata, base_name = self.visualizer.create_and_populate_subplot_figure(
                     'acc_stride', stride_dict, subject_name
@@ -3304,13 +3742,22 @@ class InsolePipeline:
         # =================================================================
         # 3. 3D STRIDE CYCLOGRAMS (if available)
         # =================================================================
-        # Note: Requires 3D trajectory data structure - placeholder for future implementation
-        # print(f"  ○ Placeholder: 3D Stride Cyclograms (Plot Set 3)")
+        has_3d_data = any('_3d' in k for k in stride_dict['left'].keys()) or any('_3d' in k for k in stride_dict['right'].keys())
+        if has_3d_data:
+            try:
+                fig, metadata, base_name = self.visualizer.create_and_populate_subplot_figure(
+                    '3d_stride', stride_dict, subject_name
+                )
+                self.visualizer.save_outputs(fig, metadata, base_name)
+                plt.close(fig)
+                print(f"  ✓ Generated: 3D Stride Cyclograms (Plot Set 3)")
+            except Exception as e:
+                print(f"  ✗ Skipped 3D Stride: {str(e)}")
 
         # =================================================================
         # 4. GYROSCOPIC GAIT CYCLOGRAMS (if available)
         # =================================================================
-        if any('GYRO' in k for k in gait_dict['left'].keys()):
+        if gait_dict['left'].get('_has_gyro', False) or gait_dict['right'].get('_has_gyro', False):
             try:
                 fig, metadata, base_name = self.visualizer.create_and_populate_subplot_figure(
                     'gyro_gait', gait_dict, subject_name
@@ -3324,7 +3771,7 @@ class InsolePipeline:
         # =================================================================
         # 5. ACCELEROMETER GAIT CYCLOGRAMS (if available)
         # =================================================================
-        if any('ACC' in k for k in gait_dict['left'].keys()):
+        if gait_dict['left'].get('_has_acc', False) or gait_dict['right'].get('_has_acc', False):
             try:
                 fig, metadata, base_name = self.visualizer.create_and_populate_subplot_figure(
                     'acc_gait', gait_dict, subject_name
@@ -3338,17 +3785,69 @@ class InsolePipeline:
         # =================================================================
         # 6. 3D GAIT CYCLOGRAMS (if available)
         # =================================================================
-        # Note: Requires 3D trajectory data structure - placeholder for future implementation
-        # print(f"  ○ Placeholder: 3D Gait Cyclograms (Plot Set 6)")
+        has_3d_gait_data = any('_3d' in k for k in gait_dict['left'].keys()) or any('_3d' in k for k in gait_dict['right'].keys())
+        if has_3d_gait_data:
+            try:
+                fig, metadata, base_name = self.visualizer.create_and_populate_subplot_figure(
+                    '3d_gait', gait_dict, subject_name
+                )
+                self.visualizer.save_outputs(fig, metadata, base_name)
+                plt.close(fig)
+                print(f"  ✓ Generated: 3D Gait Cyclograms (Plot Set 6)")
+            except Exception as e:
+                print(f"  ✗ Skipped 3D Gait: {str(e)}")
 
         # =================================================================
         # 7. GAIT EVENT TIMELINE
         # =================================================================
         try:
+            # Extract events from cycles for timeline visualization
+            def extract_events_from_cycles(cycles: List[GaitCycle]) -> Dict:
+                if not cycles:
+                    return {
+                        'heel_strikes': [],
+                        'toe_offs': [],
+                        'phases': []
+                    }
+
+                heel_strikes = []
+                toe_offs = []
+                phases_data = []
+
+                for cycle in cycles:
+                    if cycle and hasattr(cycle, 'start_time'):
+                        heel_strikes.append(cycle.start_time)
+
+                        # Toe-off is typically the first phase boundary after heel strike
+                        if hasattr(cycle, 'phases') and cycle.phases and len(cycle.phases) > 0:
+                            first_phase = cycle.phases[0]
+                            if hasattr(first_phase, 'start_time') and hasattr(first_phase, 'duration'):
+                                toe_off_time = first_phase.start_time + first_phase.duration
+                                if hasattr(cycle, 'end_time') and toe_off_time < cycle.end_time:
+                                    toe_offs.append(toe_off_time)
+
+                            # Add phase data
+                            for phase in cycle.phases:
+                                if hasattr(phase, 'start_time') and hasattr(phase, 'duration'):
+                                    phases_data.append({
+                                        'start_time': phase.start_time,
+                                        'end_time': phase.start_time + phase.duration,
+                                        'phase_name': getattr(phase, 'phase_name', 'Unknown'),
+                                        'phase_number': getattr(phase, 'phase_number', 0)
+                                    })
+
+                return {
+                    'heel_strikes': heel_strikes,
+                    'toe_offs': toe_offs,
+                    'phases': phases_data
+                }
+
             event_data = {
-                'left': left_cycles,
-                'right': right_cycles
+                'df': df,  # Add DataFrame for individual pressure sensor access
+                'left': extract_events_from_cycles(left_cycles) if left_cycles else {'heel_strikes': [], 'toe_offs': [], 'phases': []},
+                'right': extract_events_from_cycles(right_cycles) if right_cycles else {'heel_strikes': [], 'toe_offs': [], 'phases': []}
             }
+
             fig, metadata, base_name = self.visualizer.create_and_populate_subplot_figure(
                 'gait_events', event_data, subject_name
             )
@@ -3356,10 +3855,12 @@ class InsolePipeline:
             plt.close(fig)
             print(f"  ✓ Generated: Gait Event Timeline (Plot Set 7)")
         except Exception as e:
+            import traceback
             print(f"  ✗ Skipped Gait Event Timeline: {str(e)}")
+            # traceback.print_exc()  # Uncomment for debugging
 
         print(f"  \n  Comprehensive subplot figure generation complete!")
-        print(f"  Generated 5/6 core plot sets (3D plots pending full implementation)")
+        print(f"  Generated all 7 core plot sets (6 cyclogram types + gait events)")
 
     def _save_precision_events(self, df: pd.DataFrame, output_dir: Path):
         """Save high-precision gait events to CSV for validation."""
