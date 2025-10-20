@@ -4,19 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Human gait analysis system using **cyclograms** (angle-angle phase plots) to assess left-right symmetry. Analyzes MediaPipe pose estimation data to compute biomechanical metrics for clinical gait assessment.
+Human gait analysis system using **cyclograms** (angle-angle phase plots) to assess left-right symmetry from **both pose and pressure data**. Analyzes MediaPipe pose estimation and smart insole pressure data to compute biomechanical metrics for clinical gait assessment.
 
 **Core concept**: Cyclograms visualize joint coordination by plotting one joint angle against another throughout the gait cycle (heel strike → heel strike). Left-right asymmetry indicates potential gait pathology.
+
+**Dual analysis approach**:
+- **Pose-based cyclograms**: MediaPipe joint angles (hip-knee-ankle coordination)
+- **Pressure-based cyclograms**: Smart insole force distribution patterns
 
 ## Repository Information
 
 **GitHub**: https://github.com/silverline-art/Step-Cyclogram
 
 **Branch structure**:
-- `main`: Stable production branch for gait cyclogram analysis
+- `main`: Stable production branch for unified pose and insole cyclogram analysis
 - Feature branches: Use `feature/*` naming convention
-
-**Note**: The `smart insole/` directory is excluded from this repository (maintained separately) and appears in `.gitignore`.
 
 ## Development Environment
 
@@ -25,19 +27,28 @@ Human gait analysis system using **cyclograms** (angle-angle phase plots) to ass
 # Activate environment
 source .venv/bin/activate
 
-# Run analysis (from project root)
-python3 Code-Script/Analysis.py --enhance-angles
+# Run pose-based cyclogram analysis
+python3 Code-Script/Pose-Analysis.py --enhance-angles
+
+# Run insole pressure analysis
+python3 Code-Script/insole-analysis.py
 
 # Or from Code-Script directory
 cd Code-Script
-python3 Analysis.py --enhance-angles
+python3 Pose-Analysis.py --enhance-angles
+python3 insole-analysis.py
 ```
 
 **Key dependencies**: numpy, pandas, matplotlib, scipy, sklearn, fastdtw (optional)
 
+**Analysis scripts**:
+- `Pose-Analysis.py`: MediaPipe pose-based gait cyclogram analysis
+- `insole-analysis.py`: Smart insole pressure cyclogram analysis
+- `Pose-Checkpoint.py`: Checkpoint/backup version of pose analysis
+
 ## Data Architecture
 
-**Input structure** (`Sample-Data/`):
+**Pose data input** (`Sample-Data/`):
 ```
 Sample-Data/
 └── Openpose_SUBJECT_ID_DATE_TRIAL/
@@ -47,20 +58,29 @@ Sample-Data/
     └── calibrated_keypoints.csv
 ```
 
-**Output structure** (`Output/`):
+**Insole data input** (`insole-sample/`):
 ```
-Output/
-├── main_output.csv                          # Aggregate results
+insole-sample/
+└── 10MWT.csv                   # Smart insole pressure data
+```
+
+**Output structure**:
+```
+Output/                         # Pose analysis outputs
+├── main_output.csv
 └── Openpose_SUBJECT_ID/
-    ├── CK_hip_knee_AllStrides.png          # Cyclogram visualizations
+    ├── CK_hip_knee_AllStrides.png
     ├── CK_knee_ankle_AllStrides.png
     ├── CK_hip_ankle_AllStrides.png
     ├── LR_Similarity_Summary.png
-    ├── cyclogram_stride_metrics.csv         # Per-stride metrics
-    └── cyclogram_session_summary.csv        # Session summary
+    ├── cyclogram_stride_metrics.csv
+    └── cyclogram_session_summary.csv
+
+insole-output/                  # Insole analysis outputs
+└── [pressure cyclogram visualizations and metrics]
 ```
 
-## Core Pipeline (Analysis.py)
+## Core Pipeline (Pose-Analysis.py)
 
 **Full pipeline flow**:
 1. **Load data**: Raw_Angles.csv + Angle_Events.csv
@@ -85,22 +105,29 @@ Output/
 
 ## Running Analysis
 
+**Pose-based cyclogram analysis**:
 ```bash
 # Basic usage (all subjects)
-python3 Code-Script/Analysis.py
+python3 Code-Script/Pose-Analysis.py
 
 # Single subject with enhancement (RECOMMENDED)
-python3 Code-Script/Analysis.py \
+python3 Code-Script/Pose-Analysis.py \
   --subject-name "Openpose_조정자_1917321_20240117_1" \
   --enhance-angles
 
 # Custom parameters
-python3 Code-Script/Analysis.py \
+python3 Code-Script/Pose-Analysis.py \
   --enhance-angles \
   --smooth-window 15 \
   --smooth-threshold 7.0 \
   --input-dir "/path/to/data" \
   --output-dir "/path/to/results"
+```
+
+**Insole pressure analysis**:
+```bash
+# Run insole cyclogram analysis
+python3 Code-Script/insole-analysis.py
 ```
 
 **When to use `--enhance-angles`**:
@@ -111,55 +138,55 @@ python3 Code-Script/Analysis.py \
 
 ## Key Classes and Data Structures
 
-**StrideWindow** (Analysis.py:732): Represents a gait cycle (HS→HS) or stance (HS→TO)
+**StrideWindow** (Pose-Analysis.py:732): Represents a gait cycle (HS→HS) or stance (HS→TO)
 - Stores timing, duration, frame indices, window type
 - Contains quality metrics (coverage, gaps, stability)
 
-**CyclogramLoop** (Analysis.py:747): A single angle-angle trajectory
+**CyclogramLoop** (Pose-Analysis.py:747): A single angle-angle trajectory
 - Proximal/distal angles resampled to 101 points (0-100% gait cycle)
 - Tracks closure error, NaN%, quality flags
 - Used for all metric calculations
 
-**CyclogramMetrics** (Analysis.py:874): Paired L-R comparison metrics
+**CyclogramMetrics** (Pose-Analysis.py:874): Paired L-R comparison metrics
 - Area metrics: signed area, normalized area, delta area %
 - Shape metrics: Procrustes, RMSE, DTW
 - Orientation: PCA major axis angle
 - Hysteresis: CW/CCW direction
 
-**AnalysisConfig** (Analysis.py:905): Central configuration
+**AnalysisConfig** (Pose-Analysis.py:905): Central configuration
 - Processing: smoothing, FPS, resampling
 - Segmentation: stride duration constraints
 - Quality gates: coverage, gaps, stability, sanity thresholds
 - Enhancement: PCHIP confidence, pairing strategy
 
-**PipelineReport** (Analysis.py:782): Stage-by-stage tracking
+**PipelineReport** (Pose-Analysis.py:782): Stage-by-stage tracking
 - Events → cycles → QC-passed → paired
 - Rejection reasons (coverage, gaps, stability, sanity)
 - Efficiency metrics (QC pass rate, pairing efficiency)
 
-## Critical Functions
+## Critical Functions (Pose Analysis)
 
-**enhance_angles_from_keypoints()** (Analysis.py:238): Multi-tier angle recovery
+**enhance_angles_from_keypoints()** (Pose-Analysis.py:238): Multi-tier angle recovery
 - PCHIP interpolation → geometric recalculation → temporal smoothing
 - Uses MediaPipe landmarks (hip=23/24, knee=25/26, ankle=27/28, foot=31/32)
 - Hip uses atan2 for full 360° range (prevents wrapping issues)
 
-**build_cycle_windows()** (Analysis.py:1538): Extract HS→HS cycles with QC
+**build_cycle_windows()** (Pose-Analysis.py:1538): Extract HS→HS cycles with QC
 - Pairs consecutive heel strikes (same leg)
 - Applies quality gates if enabled
 - Returns valid windows + rejection statistics
 
-**pair_strides()** (Analysis.py:1849): Phase-true L-R matching
+**pair_strides()** (Pose-Analysis.py:1849): Phase-true L-R matching
 - **Cycles**: Index-based pairing (L_k ↔ R_k) after aligning starts
 - **Stance**: Mid-time proximity (fallback)
 - Validates temporal overlap (default ≥30%)
 
-**compute_all_metrics()** (Analysis.py:2175): Complete metric suite
+**compute_all_metrics()** (Pose-Analysis.py:2175): Complete metric suite
 - Area/hysteresis only for closed cycles (is_closed=True)
 - DTW captures timing asymmetry (uses fastdtw if available)
 - Normalized area = area / (π·σₓ·σᵧ) for scale-free comparison
 
-**auto_calibrate_config()** (Analysis.py:1403): Data-adaptive parameters
+**auto_calibrate_config()** (Pose-Analysis.py:1403): Data-adaptive parameters
 - Smoothing threshold from angle variability
 - Cycle duration from percentiles (10th-90th)
 - Pairing tolerance from coefficient of variation
@@ -176,7 +203,7 @@ python3 Code-Script/Analysis.py \
 - Swing phase (~40%): foot in air
 - Naturally closed loop when properly segmented
 
-**Quality gates** (Analysis.py:562):
+**Quality gates** (Pose-Analysis.py:562):
 1. **Coverage**: ≥70% non-NaN frames per joint
 2. **Gaps**: Max contiguous NaN ≤30 frames
 3. **Stability**: Pelvis vertical motion std ≤15 pixels
