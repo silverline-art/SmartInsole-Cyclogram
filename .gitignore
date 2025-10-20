@@ -37,3 +37,6 @@ Thumbs.db
 *.cache
 .pytest_cache/
 .mypy_cache/
+
+# Separate repositories
+smart insole/
