@@ -137,9 +137,22 @@ python3 Code-Script/insole-analysis.py --input data.csv --sampling-rate 100 --fi
 ```
 
 **Insole analysis outputs**:
-- **Organized subplot figures**: 7 types of multi-panel visualizations (gyro/acc stride/gait cyclograms, 3D trajectories, gait event timelines)
+- **Organized subplot figures**: 7 types of multi-panel visualizations (5 fully implemented, 2 placeholders)
+  - Plot Set 1: Gyroscopic Stride Cyclograms (2×3 grid) ✓
+  - Plot Set 2: Accelerometer Stride Cyclograms (2×3 grid) ✓
+  - Plot Set 3: 3D Stride Cyclograms (2×2 grid) - Placeholder
+  - Plot Set 4: Gyroscopic Gait Cyclograms (1×3 grid) ✓ **NEW: Multi-cycle overlay with mean + ±SD**
+  - Plot Set 5: Accelerometer Gait Cyclograms (1×3 grid) ✓ **NEW: Multi-cycle overlay with mean + ±SD**
+  - Plot Set 6: 3D Gait Cyclograms (1×2 grid) - Placeholder
+  - Plot Set 7: Gait Event Timeline (1×2 grid) ✓
+- **Gait-level enhancements** (Sets 4 & 5):
+  - All individual gait cycles overlaid (semi-transparent)
+  - Morphological mean cyclogram (MMC) computed across all cycles
+  - Shaded ±SD envelope showing cycle-to-cycle variability
+  - Bilateral left-right comparison on same axes
+  - Visualizes intra-subject consistency and bilateral symmetry
 - **PNG+JSON pairs**: Every visualization has metadata companion
-- **Directory structure**: Categorized into `plots/` and `json/` with subcategories (`gait_phases/`, `stride_cyclograms/`, etc.)
+- **Directory structure**: Categorized into `plots/` and `json/` with subcategories (`gait_phases/`, `stride_cyclograms/`, `gait_cyclograms/`, etc.)
 - **Individual cyclograms**: First 3 cycles per sensor pair with phase segmentation
 - **Summary files**: Gait cycle metrics, symmetry analysis, validation results
 

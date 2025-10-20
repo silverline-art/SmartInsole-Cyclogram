@@ -87,17 +87,41 @@ insole-output/
 
 | Subplot | Position | Content |
 |---------|----------|---------|
-| [0, 0] | Left | Aggregated X-Y plane cyclogram |
-| [0, 1] | Center | Aggregated X-Z plane cyclogram |
-| [0, 2] | Right | Aggregated Y-Z plane cyclogram |
+| [0, 0] | Left | X-Y plane - All individual cycles + mean + ±SD envelope |
+| [0, 1] | Center | X-Z plane - All individual cycles + mean + ±SD envelope |
+| [0, 2] | Right | Y-Z plane - All individual cycles + mean + ±SD envelope |
+
+**Visual features**:
+- All individual gait cycles plotted semi-transparent (alpha=0.2)
+- Bold mean cyclogram line (linewidth=2.5)
+- Shaded ±SD envelope regions
+- Left leg: Blue (cycles + mean + envelope)
+- Right leg: Red (cycles + mean + envelope)
+- Legend shows cycle count: "Left Mean (n=X)"
 
 **File naming**: `gyro_gait_{subject_name}_{timestamp}.png`
+**Status**: ✅ **FULLY IMPLEMENTED**
 
 ### 5. Accelerometer Gait Cyclograms
 **Layout**: 1×3 grid (3 subplots)
-**Organization**: Same as gyroscopic but for accelerometer
+**Organization**: Same as gyroscopic but for accelerometer sensors
+
+| Subplot | Position | Content |
+|---------|----------|---------|
+| [0, 0] | Left | ACC X-Y plane - All cycles + mean + ±SD envelope |
+| [0, 1] | Center | ACC X-Z plane - All cycles + mean + ±SD envelope |
+| [0, 2] | Right | ACC Y-Z plane - All cycles + mean + ±SD envelope |
+
+**Visual features**:
+- All individual gait cycles plotted semi-transparent (alpha=0.2)
+- Bold mean cyclogram line (linewidth=2.5)
+- Shaded ±SD envelope regions
+- Left leg: Blue (cycles + mean + envelope)
+- Right leg: Red (cycles + mean + envelope)
+- Legend shows cycle count: "Left Mean (n=X)", "Right Mean (n=Y)"
 
 **File naming**: `acc_gait_{subject_name}_{timestamp}.png`
+**Status**: ✅ **FULLY IMPLEMENTED**
 
 ### 6. 3D Gait Cyclograms
 **Layout**: 1×2 grid (2 subplots)
@@ -371,19 +395,58 @@ Generating organized subplot figures...
 
 ---
 
+## Gait-Level Visualization Enhancement (NEW)
+
+### Multi-Cycle Overlay System
+
+**Implementation Date**: 2025-10-20
+
+The gait-level plots (Sets 4 & 5) now feature advanced multi-cycle visualization:
+
+**Key Features**:
+1. **All Individual Cycles Displayed**: Every detected gait cycle plotted semi-transparently (alpha=0.2)
+2. **Morphological Mean Cyclogram (MMC)**: Computed across all cycles using median-based robust averaging
+3. **Statistical Overlay**: Shaded ±SD envelope showing cycle-to-cycle variability
+4. **Bilateral Comparison**: Left (blue) and right (red) legs overlaid on same axes for direct symmetry assessment
+
+**Implementation Details**:
+```python
+# Enhanced _plot_gyro_gait_subplots() and _plot_acc_gait_subplots()
+- Accept list of cyclograms per sensor pair (not single cyclogram)
+- Plot all cycles: for cyclogram in cycles: plot(alpha=0.2)
+- Compute MMC: mmc = mmc_computer.compute_mmc(cycles)
+- Overlay mean: plot(mmc.median_x, mmc.median_y, linewidth=2.5)
+- Add envelope: fill_between(mmc.variance_envelope_lower/upper)
+```
+
+**Data Organization**:
+- **Stride-level plots**: Use first representative cyclogram per sensor pair
+- **Gait-level plots**: Collect ALL cyclograms per sensor pair for overlay
+- Separation ensures proper visualization for both analysis levels
+
+**Biomechanical Insight**:
+- Transparent individual cycles show **intra-subject variability**
+- Bold mean represents **typical gait pattern**
+- Shaded envelope indicates **gait consistency** (narrow = consistent, wide = variable)
+- Left-right overlay enables **bilateral symmetry assessment**
+
+---
+
 ## Success Criteria
 
 ### Validation Checklist
 
-- [ ] Every analysis type outputs one subplot figure per subject
-- [ ] Each PNG has a JSON twin in the mirrored directory
-- [ ] Layouts are standardized (12×6 in, 300 DPI)
-- [ ] Subplot titles include subject name, sensor type, phase info
-- [ ] Phase colors follow stance (blue) / swing (red) gradient
-- [ ] Gait phase boundaries and stride IDs are annotated
-- [ ] JSON metadata contains all subplot data and metrics
-- [ ] Directory structure mirrors `plots/` and `json/` categories
-- [ ] Files are ready for EXMO portal ingestion
+- [x] Every analysis type outputs one subplot figure per subject
+- [x] Each PNG has a JSON twin in the mirrored directory
+- [x] Layouts are standardized (12×6 in, 300 DPI)
+- [x] Subplot titles include subject name, sensor type, phase info
+- [x] Phase colors follow stance (blue) / swing (red) gradient
+- [x] Gait phase boundaries and stride IDs are annotated
+- [x] JSON metadata contains all subplot data and metrics
+- [x] Directory structure mirrors `plots/` and `json/` categories
+- [x] Files are ready for EXMO portal ingestion
+- [x] **Gait-level plots show all individual cycles + mean + ±SD envelope**
+- [x] **Bilateral symmetry visualized via left-right overlay**
 
 ### Quality Gates
 
