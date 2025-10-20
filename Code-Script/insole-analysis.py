@@ -132,6 +132,287 @@ class CyclogramData:
     is_3d: bool = False
 
 
+class AdvancedCyclogramMetrics:
+    """
+    Comprehensive cyclogram analysis metrics for publication-quality gait research.
+
+    Implements:
+    - Level 1: Geometric/Morphology metrics
+    - Level 2: Temporal-Coupling parameters
+    - Level 3: Symmetry/Bilateral coordination
+
+    Reference: ADVANCED_CYCLOGRAM_METRICS_PLAN.md
+    """
+
+    def __init__(self, cyclogram: CyclogramData):
+        """
+        Initialize with cyclogram data.
+
+        Args:
+            cyclogram: CyclogramData instance with x_signal, y_signal, z_signal (optional)
+        """
+        self.cyclogram = cyclogram
+        self.x = cyclogram.x_signal
+        self.y = cyclogram.y_signal
+        self.z = cyclogram.z_signal if cyclogram.is_3d else None
+
+    # ========== LEVEL 1: GEOMETRIC/MORPHOLOGY METRICS ==========
+
+    def compute_geometric_metrics(self) -> Dict:
+        """
+        Compute Level 1 geometric/morphology metrics.
+
+        Returns:
+            Dictionary containing:
+            - compactness_ratio: Loop circularity (1.0 = perfect circle)
+            - aspect_ratio: Major/minor axis ratio
+            - eccentricity: Shape elongation (0 = circle, 1 = line)
+            - orientation_angle: Phase relationship angle (degrees)
+            - mean_curvature: Movement control fineness
+            - curvature_std: Curvature variability
+            - trajectory_smoothness: Coordination smoothness (0-1)
+        """
+        metrics = {}
+
+        # Compute basic geometric properties
+        area = self._compute_area()
+        perimeter = self._compute_perimeter()
+
+        # 1. Compactness Ratio (4πA/P²)
+        metrics['compactness_ratio'] = 4 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0
+
+        # 2. Fit ellipse for aspect ratio and eccentricity
+        ellipse_params = self._fit_ellipse()
+        if ellipse_params:
+            a, b, theta = ellipse_params  # major, minor, orientation
+            metrics['aspect_ratio'] = a / b if b > 0 else np.inf
+            metrics['eccentricity'] = np.sqrt(1 - (b**2 / a**2)) if a > 0 else 0
+            metrics['orientation_angle'] = np.degrees(theta)
+        else:
+            metrics['aspect_ratio'] = np.nan
+            metrics['eccentricity'] = np.nan
+            metrics['orientation_angle'] = np.nan
+
+        # 3. Mean Curvature and Trajectory Smoothness
+        curvature = self._compute_curvature()
+        metrics['mean_curvature'] = np.mean(np.abs(curvature))
+        metrics['curvature_std'] = np.std(curvature)
+        metrics['trajectory_smoothness'] = 1 / (1 + metrics['curvature_std'])
+
+        return metrics
+
+    def _compute_area(self) -> float:
+        """Compute signed area using shoelace formula."""
+        if len(self.x) < 3:
+            return 0.0
+        # Shoelace formula
+        area = 0.5 * np.abs(np.dot(self.x, np.roll(self.y, -1)) - np.dot(self.y, np.roll(self.x, -1)))
+        return area
+
+    def _compute_perimeter(self) -> float:
+        """Compute perimeter as sum of segment lengths."""
+        if len(self.x) < 2:
+            return 0.0
+        dx = np.diff(self.x)
+        dy = np.diff(self.y)
+        perimeter = np.sum(np.sqrt(dx**2 + dy**2))
+        return perimeter
+
+    def _fit_ellipse(self) -> Optional[Tuple[float, float, float]]:
+        """
+        Fit ellipse using PCA.
+
+        Returns:
+            Tuple of (major_axis, minor_axis, orientation_angle) or None if fitting fails
+        """
+        try:
+            # Center data
+            x_centered = self.x - np.mean(self.x)
+            y_centered = self.y - np.mean(self.y)
+
+            # Covariance matrix
+            coords = np.vstack([x_centered, y_centered])
+            cov = np.cov(coords)
+
+            # Eigenvalues = axes lengths
+            eigenvalues, eigenvectors = np.linalg.eig(cov)
+            idx = eigenvalues.argsort()[::-1]
+            eigenvalues = eigenvalues[idx]
+            eigenvectors = eigenvectors[:, idx]
+
+            a = np.sqrt(eigenvalues[0]) * 2  # major axis
+            b = np.sqrt(eigenvalues[1]) * 2  # minor axis
+            theta = np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0])
+
+            return (a, b, theta)
+        except:
+            return None
+
+    def _compute_curvature(self) -> np.ndarray:
+        """
+        Compute trajectory curvature κ = (x'y'' - y'x'') / (x'² + y'²)^(3/2).
+
+        Returns:
+            Array of curvature values
+        """
+        # First derivatives
+        dx = np.gradient(self.x)
+        dy = np.gradient(self.y)
+
+        # Second derivatives
+        ddx = np.gradient(dx)
+        ddy = np.gradient(dy)
+
+        # Curvature formula
+        numerator = dx * ddy - dy * ddx
+        denominator = (dx**2 + dy**2)**(3/2)
+
+        # Avoid division by zero
+        curvature = np.where(denominator > 1e-10, numerator / denominator, 0)
+
+        return curvature
+
+    # ========== LEVEL 2: TEMPORAL-COUPLING METRICS ==========
+
+    def compute_temporal_metrics(self) -> Dict:
+        """
+        Compute Level 2 temporal-coupling metrics.
+
+        Returns:
+            Dictionary containing:
+            - continuous_relative_phase: Instantaneous phase difference array
+            - mean_relative_phase: Average phase difference
+            - marp: Mean absolute relative phase
+            - coupling_angle_variability: Coordination stability
+            - deviation_phase: Phase difference standard deviation
+            - phase_shift: Mean timing lag
+        """
+        metrics = {}
+
+        # 1. Phase angles using Hilbert transform
+        phase_x = self._compute_phase_angle(self.x)
+        phase_y = self._compute_phase_angle(self.y)
+
+        # 2. Continuous Relative Phase (CRP)
+        crp = phase_x - phase_y
+        crp = np.angle(np.exp(1j * crp))  # Wrap to [-π, π]
+
+        metrics['continuous_relative_phase'] = crp
+        metrics['mean_relative_phase'] = np.mean(crp)
+        metrics['marp'] = np.mean(np.abs(crp))
+
+        # 3. Coupling Angle Variability
+        coupling_angle = np.arctan2(np.gradient(self.y), np.gradient(self.x))
+        metrics['coupling_angle_variability'] = np.std(coupling_angle)
+        metrics['deviation_phase'] = np.std(crp)
+
+        # 4. Phase Shift
+        metrics['phase_shift'] = np.mean(phase_x - phase_y)
+
+        return metrics
+
+    def _compute_phase_angle(self, signal: np.ndarray) -> np.ndarray:
+        """
+        Compute phase angle using Hilbert transform.
+
+        Args:
+            signal: 1D time series data
+
+        Returns:
+            Phase angle array
+        """
+        from scipy.signal import hilbert
+        analytic_signal = hilbert(signal - np.mean(signal))
+        phase = np.angle(analytic_signal)
+        return phase
+
+    # ========== LEVEL 3: SYMMETRY/BILATERAL COORDINATION ==========
+
+    @staticmethod
+    def compute_bilateral_symmetry(left_cyclogram: 'CyclogramData',
+                                   right_cyclogram: 'CyclogramData') -> Dict:
+        """
+        Compute Level 3 bilateral symmetry metrics between left and right cyclograms.
+
+        Args:
+            left_cyclogram: Left leg cyclogram
+            right_cyclogram: Right leg cyclogram
+
+        Returns:
+            Dictionary containing:
+            - symmetry_index: Inter-limb asymmetry percentage
+            - mirror_correlation: Bilateral similarity
+            - rms_trajectory_diff: Functional asymmetry
+            - rms_trajectory_diff_x: X-axis trajectory difference
+            - rms_trajectory_diff_y: Y-axis trajectory difference
+        """
+        metrics = {}
+
+        # Compute areas
+        left_metrics_obj = AdvancedCyclogramMetrics(left_cyclogram)
+        right_metrics_obj = AdvancedCyclogramMetrics(right_cyclogram)
+
+        area_left = left_metrics_obj._compute_area()
+        area_right = right_metrics_obj._compute_area()
+
+        # 1. Symmetry Index (SI)
+        if (area_left + area_right) > 0:
+            metrics['symmetry_index'] = ((area_left - area_right) /
+                                        ((area_left + area_right) / 2) * 100)
+        else:
+            metrics['symmetry_index'] = 0.0
+
+        # 2. Mirror Correlation and RMS Trajectory Difference
+        # Resample both to same length for comparison
+        target_len = 101
+        left_x_resampled = AdvancedCyclogramMetrics._resample_signal(left_cyclogram.x_signal, target_len)
+        left_y_resampled = AdvancedCyclogramMetrics._resample_signal(left_cyclogram.y_signal, target_len)
+        right_x_resampled = AdvancedCyclogramMetrics._resample_signal(right_cyclogram.x_signal, target_len)
+        right_y_resampled = AdvancedCyclogramMetrics._resample_signal(right_cyclogram.y_signal, target_len)
+
+        # Mirror right cyclogram horizontally for correlation
+        right_x_mirrored = -right_x_resampled
+
+        # Compute mirror correlation
+        if len(left_x_resampled) > 1 and len(right_x_mirrored) > 1:
+            try:
+                corr_matrix = np.corrcoef(left_x_resampled, right_x_mirrored)
+                metrics['mirror_correlation'] = corr_matrix[0, 1]
+            except:
+                metrics['mirror_correlation'] = np.nan
+        else:
+            metrics['mirror_correlation'] = np.nan
+
+        # 3. RMS Trajectory Difference
+        rms_x = np.sqrt(np.mean((left_x_resampled - right_x_resampled)**2))
+        rms_y = np.sqrt(np.mean((left_y_resampled - right_y_resampled)**2))
+        metrics['rms_trajectory_diff_x'] = rms_x
+        metrics['rms_trajectory_diff_y'] = rms_y
+        metrics['rms_trajectory_diff'] = np.sqrt(rms_x**2 + rms_y**2)
+
+        return metrics
+
+    @staticmethod
+    def _resample_signal(signal: np.ndarray, target_length: int) -> np.ndarray:
+        """
+        Resample signal to target length using linear interpolation.
+
+        Args:
+            signal: Input signal array
+            target_length: Desired output length
+
+        Returns:
+            Resampled signal
+        """
+        if len(signal) < 2:
+            return np.full(target_length, signal[0] if len(signal) == 1 else 0.0)
+
+        old_indices = np.linspace(0, 1, len(signal))
+        new_indices = np.linspace(0, 1, target_length)
+        resampled = np.interp(new_indices, old_indices, signal)
+        return resampled
+
+
 @dataclass
 class GaitEventRecord:
     """High-precision gait event with sensor zone information."""
@@ -3182,9 +3463,17 @@ class InsoleVisualizer:
         return subplot_metrics
 
     def _compute_cyclogram_metrics(self, cyclogram: 'CyclogramData') -> Dict:
-        """Helper to compute standard metrics for a cyclogram."""
+        """
+        Compute comprehensive cyclogram metrics (basic + advanced).
+
+        Integrates:
+        - Basic metrics: area, perimeter, closure error
+        - Level 1 (Geometric): compactness, aspect ratio, eccentricity, curvature, smoothness
+        - Level 2 (Temporal): phase coupling, CRP, MARP, coupling angle variability
+        """
         x, y = cyclogram.x_signal, cyclogram.y_signal
 
+        # ===== BASIC METRICS (existing) =====
         # Area (shoelace formula)
         area = 0.5 * np.abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
 
@@ -3199,12 +3488,36 @@ class InsoleVisualizer:
         # Closure error
         closure_error = np.sqrt((x[-1] - x[0])**2 + (y[-1] - y[0])**2)
 
-        return {
+        basic_metrics = {
             'area': float(area),
             'perimeter': float(perimeter),
             'compactness': float(compactness),
             'closure_error': float(closure_error)
         }
+
+        # ===== ADVANCED METRICS (new) =====
+        try:
+            advanced_computer = AdvancedCyclogramMetrics(cyclogram)
+
+            # Level 1: Geometric/Morphology
+            geometric_metrics = advanced_computer.compute_geometric_metrics()
+
+            # Level 2: Temporal-Coupling
+            temporal_metrics = advanced_computer.compute_temporal_metrics()
+
+            # Combine all metrics
+            all_metrics = {
+                **basic_metrics,
+                **geometric_metrics,
+                **temporal_metrics
+            }
+
+            return all_metrics
+
+        except Exception as e:
+            # Fallback to basic metrics if advanced computation fails
+            print(f"Warning: Advanced metrics computation failed: {e}")
+            return basic_metrics
 
     def create_and_populate_subplot_figure(self, analysis_type: str, data_dict: Dict,
                                            subject_name: str = "Unknown") -> Tuple[plt.Figure, Dict, str]:
@@ -3414,11 +3727,17 @@ class InsolePipeline:
         # Save symmetry metrics
         self._save_symmetry_results(symmetry_metrics, output_dir)
 
+        # Save advanced cyclogram metrics (Levels 1-3)
+        self._save_advanced_cyclogram_metrics(left_cyclograms, right_cyclograms, output_dir)
+
         # Save precision events if available
         if self.precision_detector is not None:
             self._save_precision_events(df, output_dir)
             # Create debug validation plots
             self.create_debug_event_validation_plot(df, output_dir)
+
+        # Export comprehensive Excel workbook with all results
+        self._export_comprehensive_excel(output_dir)
 
         print("\n" + "="*70)
         print("ANALYSIS COMPLETE")
@@ -3607,6 +3926,155 @@ class InsolePipeline:
         aggregate.to_csv(aggregate_path)
 
         print(f"  Saved aggregate summary: {aggregate_path}")
+
+    def _save_advanced_cyclogram_metrics(self, left_cyclograms: List[CyclogramData],
+                                        right_cyclograms: List[CyclogramData],
+                                        output_dir: Path):
+        """
+        Compute and save advanced cyclogram metrics (Levels 1-3) to CSV.
+
+        Args:
+            left_cyclograms: List of left leg cyclograms
+            right_cyclograms: List of right leg cyclograms
+            output_dir: Directory to save results
+        """
+        print("\n  Computing advanced cyclogram metrics...")
+
+        metrics_data = []
+
+        # Process all cyclograms
+        all_cyclograms = left_cyclograms + right_cyclograms
+
+        for cyclogram in all_cyclograms:
+            # Compute metrics for this cyclogram
+            metrics = self.visualizer._compute_cyclogram_metrics(cyclogram)
+
+            # Add identifying information
+            metrics_row = {
+                'cycle_id': cyclogram.cycle.cycle_id,
+                'leg': cyclogram.cycle.leg,
+                'cyclogram_type': f"{cyclogram.x_label}_vs_{cyclogram.y_label}",
+                'duration': cyclogram.cycle.duration,
+                **metrics  # Unpack all computed metrics
+            }
+
+            metrics_data.append(metrics_row)
+
+        # Create DataFrame
+        df_metrics = pd.DataFrame(metrics_data)
+
+        # Save to CSV
+        metrics_path = output_dir / 'cyclogram_advanced_metrics.csv'
+        df_metrics.to_csv(metrics_path, index=False)
+
+        print(f"  Saved advanced metrics: {metrics_path}")
+        print(f"  Total cyclograms analyzed: {len(metrics_data)}")
+
+        # Compute and save aggregate statistics by cyclogram type
+        if not df_metrics.empty:
+            # Group by cyclogram type and leg
+            aggregate = df_metrics.groupby(['cyclogram_type', 'leg']).agg({
+                'area': ['mean', 'std'],
+                'compactness_ratio': ['mean', 'std'],
+                'aspect_ratio': ['mean', 'std'],
+                'eccentricity': ['mean', 'std'],
+                'mean_curvature': ['mean', 'std'],
+                'trajectory_smoothness': ['mean', 'std'],
+                'mean_relative_phase': ['mean', 'std'],
+                'marp': ['mean', 'std'],
+                'coupling_angle_variability': ['mean', 'std']
+            }).round(4)
+
+            aggregate_path = output_dir / 'cyclogram_metrics_aggregate.csv'
+            aggregate.to_csv(aggregate_path)
+
+            print(f"  Saved aggregate statistics: {aggregate_path}")
+
+        # Compute Level 3 (Symmetry) metrics for paired left-right cyclograms
+        symmetry_metrics_data = []
+
+        # Group cyclograms by type
+        cyclogram_dict = {'left': {}, 'right': {}}
+        for cyclogram in all_cyclograms:
+            cyc_type = f"{cyclogram.x_label}_vs_{cyclogram.y_label}"
+            leg = cyclogram.cycle.leg
+
+            if cyc_type not in cyclogram_dict[leg]:
+                cyclogram_dict[leg][cyc_type] = []
+            cyclogram_dict[leg][cyc_type].append(cyclogram)
+
+        # Compute bilateral symmetry for each cyclogram type
+        for cyc_type in set(cyclogram_dict['left'].keys()) & set(cyclogram_dict['right'].keys()):
+            left_list = cyclogram_dict['left'][cyc_type]
+            right_list = cyclogram_dict['right'][cyc_type]
+
+            # Pair cyclograms by cycle_id
+            for left_cyc in left_list:
+                for right_cyc in right_list:
+                    if left_cyc.cycle.cycle_id == right_cyc.cycle.cycle_id:
+                        # Compute bilateral symmetry
+                        symmetry = AdvancedCyclogramMetrics.compute_bilateral_symmetry(
+                            left_cyc, right_cyc
+                        )
+
+                        symmetry_row = {
+                            'cycle_id': left_cyc.cycle.cycle_id,
+                            'cyclogram_type': cyc_type,
+                            **symmetry
+                        }
+
+                        symmetry_metrics_data.append(symmetry_row)
+                        break  # Only pair once
+
+        if symmetry_metrics_data:
+            df_symmetry = pd.DataFrame(symmetry_metrics_data)
+            symmetry_path = output_dir / 'cyclogram_bilateral_symmetry.csv'
+            df_symmetry.to_csv(symmetry_path, index=False)
+
+            print(f"  Saved bilateral symmetry metrics: {symmetry_path}")
+            print(f"  Total cyclogram pairs analyzed: {len(symmetry_metrics_data)}")
+
+    def _export_comprehensive_excel(self, output_dir: Path):
+        """
+        Export all results to a comprehensive Excel workbook (Result_output.xlsx).
+
+        Creates multiple sheets:
+        - Gait Cycles: Cycle timing and duration metrics
+        - Advanced Metrics: All cyclogram metrics (Levels 1-3)
+        - Bilateral Symmetry: Left-right symmetry analysis
+        - Aggregated Stats: Summary statistics by cyclogram type
+        - Precision Events: High-precision gait events
+        """
+        print("\n  Creating comprehensive Excel export...")
+
+        excel_path = output_dir / 'Result_output.xlsx'
+
+        # Load all CSV files
+        csv_files = {
+            'Gait Cycles': output_dir / 'gait_cycle_summary.csv',
+            'Bilateral Comparison': output_dir / 'bilateral_comparison_summary.csv',
+            'Advanced Metrics': output_dir / 'cyclogram_advanced_metrics.csv',
+            'Cyclogram Symmetry': output_dir / 'cyclogram_bilateral_symmetry.csv',
+            'Aggregated Stats': output_dir / 'cyclogram_metrics_aggregate.csv',
+            'Symmetry Metrics': output_dir / 'symmetry_metrics.csv',
+            'Symmetry Aggregate': output_dir / 'symmetry_aggregate.csv',
+            'Precision Events': output_dir / 'precision_gait_events.csv'
+        }
+
+        # Create Excel writer
+        with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+            for sheet_name, csv_path in csv_files.items():
+                if csv_path.exists():
+                    try:
+                        df = pd.read_csv(csv_path)
+                        df.to_excel(writer, sheet_name=sheet_name, index=False)
+                        print(f"    Added sheet: {sheet_name} ({len(df)} rows)")
+                    except Exception as e:
+                        print(f"    Warning: Could not add {sheet_name}: {e}")
+                else:
+                    print(f"    Skipping {sheet_name} (file not found)")
+
+        print(f"  Saved comprehensive Excel: {excel_path}")
 
     def _generate_subplot_figures(self, left_cyclograms: List[CyclogramData],
                                   right_cyclograms: List[CyclogramData],

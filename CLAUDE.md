@@ -137,22 +137,32 @@ python3 Code-Script/insole-analysis.py --input data.csv --sampling-rate 100 --fi
 ```
 
 **Insole analysis outputs**:
-- **Organized subplot figures**: 7 types of multi-panel visualizations (5 fully implemented, 2 placeholders)
+- **Organized subplot figures**: 7 types of multi-panel visualizations
   - Plot Set 1: Gyroscopic Stride Cyclograms (2×3 grid) ✓
   - Plot Set 2: Accelerometer Stride Cyclograms (2×3 grid) ✓
   - Plot Set 3: 3D Stride Cyclograms (2×2 grid) - Placeholder
-  - Plot Set 4: Gyroscopic Gait Cyclograms (1×3 grid) ✓ **NEW: Multi-cycle overlay with mean + ±SD**
-  - Plot Set 5: Accelerometer Gait Cyclograms (1×3 grid) ✓ **NEW: Multi-cycle overlay with mean + ±SD**
+  - Plot Set 4: Gyroscopic Gait Cyclograms (2×3 grid) ✓ **Multi-cycle overlay with mean + ±SD**
+  - Plot Set 5: Accelerometer Gait Cyclograms (2×3 grid) ✓ **Multi-cycle overlay with mean + ±SD**
   - Plot Set 6: 3D Gait Cyclograms (1×2 grid) - Placeholder
-  - Plot Set 7: Gait Event Timeline (1×2 grid) ✓
+  - Plot Set 7: Gait Event Timeline (1×2 grid) ✓ **Clean legend with unique phase labels**
 - **Gait-level enhancements** (Sets 4 & 5):
-  - All individual gait cycles overlaid (semi-transparent)
-  - Morphological mean cyclogram (MMC) computed across all cycles
+  - Layout: 2×3 grid (Left leg row 0, Right leg row 1 × X-Y/X-Z/Y-Z columns)
+  - All individual gait cycles overlaid (semi-transparent alpha=0.2)
+  - Morphological mean cyclogram (MMC) computed via median-based robust averaging
   - Shaded ±SD envelope showing cycle-to-cycle variability
-  - Bilateral left-right comparison on same axes
+  - Bilateral left-right comparison for direct symmetry assessment
   - Visualizes intra-subject consistency and bilateral symmetry
+- **Step detection**: Adaptive multi-loop optimization (5 iterations)
+  - Dynamic threshold and prominence calculation
+  - Contact period detection with clean transition validation
+  - Typical results: 18 heel strikes per leg with ~88% confidence
 - **PNG+JSON pairs**: Every visualization has metadata companion
-- **Directory structure**: Categorized into `plots/` and `json/` with subcategories (`gait_phases/`, `stride_cyclograms/`, `gait_cyclograms/`, etc.)
+- **Directory structure**: Categorized into `plots/` and `json/` with subcategories:
+  - `gait_phases/`: Gait event timelines
+  - `stride_cyclograms/`: Stride-level cyclograms
+  - `gait_cyclograms/`: Gait-level (aggregated) cyclograms
+  - `mean_cyclograms/`: Morphological mean cyclograms
+  - `symmetry/`: Bilateral symmetry analyses
 - **Individual cyclograms**: First 3 cycles per sensor pair with phase segmentation
 - **Summary files**: Gait cycle metrics, symmetry analysis, validation results
 
@@ -192,32 +202,99 @@ See `claudedocs/insole_subplot_visualization_system.md` for complete documentati
 - Rejection reasons (coverage, gaps, stability, sanity)
 - Efficiency metrics (QC pass rate, pairing efficiency)
 
-## Critical Functions (Pose Analysis)
+### Insole Data Structures (insole-analysis.py)
 
-**enhance_angles_from_keypoints()** (Pose-Analysis.py:238): Multi-tier angle recovery
+**InsoleConfig** (line 64): Central configuration
+- Signal processing: sampling rate, filter cutoff, filter order
+- Gait constraints: min/max cycle duration, min stance/swing duration
+- Phase detection: pressure thresholds, gyro swing threshold
+- Validation: stance/swing ratio bounds, bilateral tolerance
+- Visualization: plot DPI, cyclogram resolution
+
+**GaitPhase** (line 94): Single gait phase annotation
+- Phase info: name (IC, LR, MSt, etc.), leg, phase number
+- Timing: start/end time, start/end index, duration
+
+**GaitCycle** (line 107): Complete gait cycle
+- Cycle info: leg, cycle_id, timing
+- Contains list of GaitPhase objects
+- Stance/swing durations and ratio
+
+**CyclogramData** (line 121): IMU-based cyclogram
+- Sensor signals: x, y, z (optional) arrays
+- Linked GaitCycle object
+- Phase boundaries: indices and labels for coloring
+- 2D/3D flag
+
+**GaitEventRecord** (line 136): High-precision gait event
+- Event type: heel_strike, mid_stance, toe_off
+- Timing: start, end, duration (milliseconds)
+- Sensor source and frame indices
+- Confidence score (0.0-1.0)
+
+## Critical Functions
+
+### Pose Analysis (Pose-Analysis.py)
+
+**enhance_angles_from_keypoints()** (line 238): Multi-tier angle recovery
 - PCHIP interpolation → geometric recalculation → temporal smoothing
 - Uses MediaPipe landmarks (hip=23/24, knee=25/26, ankle=27/28, foot=31/32)
 - Hip uses atan2 for full 360° range (prevents wrapping issues)
 
-**build_cycle_windows()** (Pose-Analysis.py:1538): Extract HS→HS cycles with QC
+**build_cycle_windows()** (line 1538): Extract HS→HS cycles with QC
 - Pairs consecutive heel strikes (same leg)
 - Applies quality gates if enabled
 - Returns valid windows + rejection statistics
 
-**pair_strides()** (Pose-Analysis.py:1849): Phase-true L-R matching
+**pair_strides()** (line 1849): Phase-true L-R matching
 - **Cycles**: Index-based pairing (L_k ↔ R_k) after aligning starts
 - **Stance**: Mid-time proximity (fallback)
 - Validates temporal overlap (default ≥30%)
 
-**compute_all_metrics()** (Pose-Analysis.py:2175): Complete metric suite
+**compute_all_metrics()** (line 2175): Complete metric suite
 - Area/hysteresis only for closed cycles (is_closed=True)
 - DTW captures timing asymmetry (uses fastdtw if available)
 - Normalized area = area / (π·σₓ·σᵧ) for scale-free comparison
 
-**auto_calibrate_config()** (Pose-Analysis.py:1403): Data-adaptive parameters
+**auto_calibrate_config()** (line 1403): Data-adaptive parameters
 - Smoothing threshold from angle variability
 - Cycle duration from percentiles (10th-90th)
 - Pairing tolerance from coefficient of variation
+
+**compute_morphological_mean()** (line 2175): MMC computation
+- DTW-based median reference selection
+- Centroid centering and area rescaling
+- Median trajectory with variance envelope
+- Returns MorphologicalMeanCyclogram or None
+
+### Insole Analysis (insole-analysis.py)
+
+**detect_heel_strikes_adaptive()** (line 883): Adaptive step detection
+- Multi-loop optimization (5 iterations)
+- Dynamic threshold: `base + loop * 0.1 * std(pressure)`
+- Contact period detection with clean transition validation
+- Returns heel strikes with confidence scores
+
+**detect_gait_sub_phases()** (line ~1100): 8-phase segmentation
+- Dynamic detection: IC, LR, MSt, TSt, PSw, ISw, MSw, TSw
+- Phase duration validation against biomechanical constraints
+- Returns GaitPhase objects with timing and indices
+
+**build_subplot_grid()** (line ~2301): Automated figure layout
+- Auto-detects grid dimensions from analysis type
+- Returns matplotlib Figure and axes array
+- Handles 2×3, 2×2, 1×3, 1×2 layouts
+
+**create_and_populate_subplot_figure()** (line ~2789): Complete workflow
+- Creates grid → populates subplots → generates metadata
+- Returns figure, metadata, base_name for saving
+- Automatic categorization and directory routing
+
+**_generate_subplot_figures()** (line ~3131): Pipeline integration
+- Organizes cyclograms by sensor type and leg
+- Maps sensor pairs to subplot labels
+- Generates and saves all subplot figures
+- Reports generation status
 
 ## Biomechanical Concepts
 
@@ -243,6 +320,14 @@ See `claudedocs/insole_subplot_visualization_system.md` for complete documentati
 - **DTW**: Timing/phase mismatch (critical for cadence asymmetry)
 - **Area**: Loop size (indicates range of motion)
 - **Orientation**: PCA major axis (indicates tilt/bias)
+
+**Morphological Mean Cyclogram (MMC)** (Pose-Analysis.py:2175):
+- Replaces naive mean averaging with phase-aligned morphological median
+- **Pipeline**: Filter valid loops → Find median reference (DTW) → Center to centroid → Rescale to median area → Compute median shape → Variance envelope
+- **Shape Dispersion Index (SDI)**: Quantifies stride-to-stride variability (< 0.1 = consistent, 0.1-0.3 = normal, > 0.3 = high variability)
+- **Benefits**: Robust to outliers, preserves gait shape, visualizes variability via ±SD envelope
+- **Use**: All "mean cyclogram" references should use MMC, not `np.mean()`
+- See `claudedocs/MMC_METHODOLOGY.md` for complete details
 
 ## Common Development Tasks
 
@@ -283,18 +368,25 @@ similarity_weights = {
 
 ## Design Documents
 
-**Documentation location**: `Code-Script/*.md`
-- `README.md`: Usage guide, enhancement details, troubleshooting
-- `DATA_QUALITY_DESIGN.md`: Quality control philosophy
-- `IMPLEMENTATION_PLAN.md`: Feature roadmap
-- `PAIRING_ANALYSIS.md`: L-R pairing strategy analysis
-- `PHASE*_*.md`: Implementation progress logs
+**Documentation location**: `claudedocs/`
+- `insole_subplot_visualization_system.md`: Complete subplot visualization architecture
+- `MMC_METHODOLOGY.md`: Morphological Mean Cyclogram implementation details
+- `angle_calculation_design.md`: Joint angle calculation methodology
+- `cyclogram_system_design.md`: Cyclogram generation system architecture
+- `ROOT_CAUSE_ANALYSIS.md`: Major bug investigations and resolutions
+- `CRITICAL_IMPROVEMENTS_ANALYSIS.md`: Performance and quality improvements
+- `IMPLEMENTATION_STATUS.md`: Feature implementation status tracking
 
 **Important context** (`request update.txt`):
 - Contains biomechanical rationale for cycle-based analysis
 - Explains why HS→HS (not HS→TO) is critical
 - Details proper pairing strategies (index vs mid-time)
 - Justifies PCHIP over cubic interpolation
+
+**Recent fixes** (`TROUBLESHOOTING_SUMMARY.md`):
+- Legend overcrowding in gait events timeline (line 2656-2671)
+- Cyclogram subplot layout from 1×3 to 2×3 (lines 2773-2917)
+- Adaptive step detection algorithm (lines 883-969)
 
 ## Critical Warnings
 
@@ -305,10 +397,17 @@ similarity_weights = {
 - Apply cubic splines to biomechanical angles (use PCHIP, line ~1816)
 - Skip quality gates without understanding impact on metric validity
 
-**MediaPipe landmark indices** (line ~283):
+**MediaPipe landmark indices** (Pose-Analysis.py:283):
 - Left: hip=23, knee=25, ankle=27, foot=31
 - Right: hip=24, knee=26, ankle=28, foot=32
 - Pelvis: average of landmarks 23 and 24
+
+**Insole analysis warnings** (insole-analysis.py):
+- Always use adaptive step detection (line 883), not simple threshold-based
+- Gait cyclogram layouts must be 2×3 (Left row 0, Right row 1), not 1×3 overlay
+- Use set tracking for gait event legend to avoid 400+ duplicate labels (line 2656)
+- Ensure metadata flags `_has_gyro` and `_has_acc` are set for conditional plot generation (line 3568)
+- Phase color scheme: Stance (blue gradient), Swing (red gradient)
 
 ## Debugging Tips
 
@@ -324,15 +423,31 @@ similarity_weights = {
 - Rejection reasons indicate which quality gate failed
 - Pairing efficiency reveals temporal alignment issues
 
-**Common issues**:
+**Common issues (Pose analysis)**:
 - **Few pairs**: Check event detection quality, adjust cycle duration constraints
 - **High rejection rate**: Relax quality gates or use `--enhance-angles`
 - **Poor closure**: Likely event detection error or non-cycle segmentation
 - **NaN in metrics**: Check for empty loops or failed interpolation
 
+**Common issues (Insole analysis)**:
+- **Few heel strikes detected**: Check pressure sensor data quality, adjust adaptive thresholds
+- **Subplot figures not generated**: Verify cyclograms generated successfully, check sensor data columns
+- **Legend overcrowding**: Ensure set tracking implemented for unique phase labels only
+- **Wrong subplot layout**: Verify 2×3 grid for gait cyclograms (not 1×3)
+- **"No data" subplots**: Check sensor pair exists in input, verify gait cycles detected
+- **Phase colors incorrect**: Review phase_indices/phase_labels alignment in cyclogram
+
 ## Performance Notes
 
+**Pose Analysis**:
 - **Runtime**: ~45-75 seconds per subject with enhancement (~30-60 without)
 - **Memory**: ~200-500MB per subject
 - **Bottlenecks**: DTW computation (O(N²), use fastdtw for speedup)
 - **Batch processing**: Sequential (not parallel)
+
+**Insole Analysis**:
+- **Runtime**: ~30-60 seconds per subject (including subplot generation)
+- **Memory**: ~200-500MB per subject (50-100MB per subplot figure at 300 DPI)
+- **Bottlenecks**: Adaptive step detection (5 iterations), subplot figure generation (~5-10 sec/figure)
+- **Optimization**: Close figures after saving with `plt.close(fig)`, reduce DPI to 150 for prototyping
+- **Batch processing**: Sequential (use `--batch` flag for multiple CSVs)
