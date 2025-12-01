@@ -1,0 +1,31 @@
+Data dir: "/home/shivam/Desktop/Human_Pose/PROJECT CYCLOGRAM/DATA ANALYSIS Script/Data" contains
+- ACC_3D.xlsx
+- ACC_XY.xlsx
+- ACC_XZ.xlsx
+- ACC_YZ.xlsx
+- patient_list.xlsx
+
+|Patients in List        | 143      |
+|Total Directories Found | 234      |
+|Excel Rows              | 225      |
+|Multi-Visit Patients    | 60 (42%) |
+
+
+
+Desired output:
+output_dir: "/home/shivam/Desktop/Human_Pose/PROJECT CYCLOGRAM/DATA ANALYSIS Script/data_output"
+plots png and output csv for the data and make sure all of the  parameters are recognized and are used in the cluster (excluding: Dataset; Patient Name; Patient ID; Fracture Site; Fracture Name (as they are sample information not data))
+in first there must be following plots
+
+cluster plot with outliers marked with different color and Fracture Site [Lt (Red color) and Rt (Blue color) must be labelled]
+- cluster plot for ACC_3D cyclogram metrics
+- cluster plot for ACC_XY cyclogram metrics
+- cluster plot for ACC_XZ cyclogram metrics
+- cluster plot for ACC_YZ cyclogram metrics
+- cluster plot for ACC_3D gait metrics
+- cluster plot for ACC_XY gait metrics
+- cluster plot for ACC_XZ gait metrics
+- cluster plot for ACC_YZ gait metrics
+
+The output csv only contains the information about the
+Dataset; Patient Name; Patient ID; Fracture Site; Fracture Name; Cluster No.; Outlier (Y/N)

@@ -1,39 +1,143 @@
+# ============================================================================
 # Python
+# ============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+
+# Virtual Environments
 .venv/
 venv/
 ENV/
 env/
+*.egg-info/
+dist/
+build/
 
-# Analysis Output
+# ============================================================================
+# DATASETS - Exclude ALL except 10MWT sample
+# ============================================================================
+
+# Exclude all Dataset directories and files
+Dataset/
+Sample-Data/
+insole-sample/
+!insole-sample/
+!insole-sample/10MWT.csv
+
+# Exclude patient data directories
+Patients-plot/
+cyclogram/
+
+# Exclude DATA ANALYSIS Script data
+DATA ANALYSIS Script/Data/
+DATA ANALYSIS Script/data_output/
+DATA ANALYSIS Script/Backup/
+DATA ANALYSIS Script/*.xlsx
+DATA ANALYSIS Script/*.zip
+DATA ANALYSIS Script/*.docx
+
+# ============================================================================
+# OUTPUTS - Exclude ALL output results
+# ============================================================================
+
+# All output directories
 Output/
-*.png
-*.csv
-!Sample-Data/**/*.csv
+insole-output/
+*-output/
+*/output/
+*/Output/
 
-# IDE
+# Generated plots and visualizations
+*.png
+*.pdf
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.avi
+
+# CSV outputs (but allow input CSVs in specific locations)
+*.csv
+!insole-sample/10MWT.csv
+
+# JSON outputs
+*.json
+!**/package.json
+!**/tsconfig.json
+
+# Excel outputs
+*.xlsx
+*.xls
+*.ods
+
+# ============================================================================
+# IDE and Editor
+# ============================================================================
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+.project
+.pydevproject
+.settings/
 
-# OS
+# ============================================================================
+# OS Files
+# ============================================================================
 .DS_Store
 Thumbs.db
 *.log
-
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# Temporary files
 *.tmp
 *.bak
 *.cache
+
+# ============================================================================
+# Development
+# ============================================================================
 .pytest_cache/
 .mypy_cache/
+.ipynb_checkpoints/
+*.ipynb
+
+# Jupyter checkpoints
+*/.ipynb_checkpoints/
+
+# ============================================================================
+# Documentation (keep technical docs, exclude outputs)
+# ============================================================================
+# Keep claudedocs/ but exclude any generated outputs within
+claudedocs/**/*.png
+claudedocs/**/*.pdf
+claudedocs/**/*.csv
+
+# ============================================================================
+# Temporary and backup files
+# ============================================================================
+*.zip
+*.tar
+*.gz
+*~
+*.orig
+*.rej
+.*.swp
+*.tmp
+*.bak
+*.backup
+
+# ============================================================================
+# Git
+# ============================================================================
+*.orig
+*.rej
+.git-rewrite/
+
+# ============================================================================
+# Academic Publication - ONLY include:
+# - Scripts (CYCLOGRAM-PROCESSING Script/, DATA ANALYSIS Script/)
+# - Documentation (CLAUDE.md, README.md, claudedocs/)
+# - Sample data (insole-sample/10MWT.csv ONLY)
+# ============================================================================
