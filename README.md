@@ -78,7 +78,7 @@ A comprehensive research pipeline for analyzing human gait patterns using **cycl
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/SmartInsole-Cyclogram.git
+git clone https://github.com/silverline-art/SmartInsole-Cyclogram.git
 cd SmartInsole-Cyclogram
 
 # Create virtual environment
@@ -233,7 +233,7 @@ If you use this software in your research, please cite:
   title = {SmartInsole-Cyclogram: Advanced Gait Analysis Using Cyclograms},
   author = {[Your Research Group]},
   year = {2025},
-  url = {https://github.com/yourusername/SmartInsole-Cyclogram},
+  url = {https://github.com/silverline-art/SmartInsole-Cyclogram},
   version = {1.0.0}
 }
 ```
